@@ -1,0 +1,19 @@
+{
+  "name": "@retrace/config",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    "./tailwind": "./tailwind.config.ts",
+    "./tsconfig/base.json": "./tsconfig.base.json"
+  },
+  "scripts": {
+    "build": "tsc --noEmit false --declaration --emitDeclarationOnly --outDir dist",
+    "lint": "tsc --noEmit",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "tailwindcss": "^4.3.0",
+    "typescript": "^5.9.3"
+  }
+}

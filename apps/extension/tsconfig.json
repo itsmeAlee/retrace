@@ -1,0 +1,8 @@
+{
+  "extends": "@retrace/config/tsconfig/base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "types": ["wxt/browser"]
+  },
+  "include": [".wxt/wxt.d.ts", "entrypoints", "wxt.config.ts"]
+}
