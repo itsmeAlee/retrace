@@ -1,7 +1,7 @@
 import { AppwriteException } from "node-appwrite";
 import { NextResponse } from "next/server";
 import { SESSION_COOKIE_NAME, sessionCookieOptions } from "../../../../lib/auth-session";
-import { createAdminAccount } from "../../../../lib/server/appwrite";
+import { createAdminAccount, markEmailVerified } from "../../../../lib/server/appwrite";
 
 export const runtime = "nodejs";
 
@@ -31,6 +31,9 @@ export async function POST(request: Request) {
       email: email.trim().toLowerCase(),
       password
     });
+    if (session.userId) {
+      await markEmailVerified(session.userId).catch(() => {});
+    }
 
     const response = NextResponse.json({ success: true });
     response.cookies.set(SESSION_COOKIE_NAME, session.secret, sessionCookieOptions(session.expire));

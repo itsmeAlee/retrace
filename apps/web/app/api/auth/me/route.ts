@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { SESSION_COOKIE_NAME, sessionCookieOptions } from "../../../../lib/auth-session";
-import { createSessionAccount } from "../../../../lib/server/appwrite";
+import { createSessionAccount, ensureEmailVerified } from "../../../../lib/server/appwrite";
 
 export const runtime = "nodejs";
 
@@ -24,7 +24,8 @@ export async function GET(request: Request) {
 
   try {
     const user = await createSessionAccount(decodeURIComponent(session)).get();
-    return NextResponse.json({ success: true, user });
+    const verifiedUser = await ensureEmailVerified(user).catch(() => user);
+    return NextResponse.json({ success: true, user: verifiedUser });
   } catch {
     return unauthorized();
   }

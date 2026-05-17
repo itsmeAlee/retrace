@@ -76,6 +76,11 @@ export default async (context) => withHandler('auth-signup-verify', context, asy
     name: pending.name,
   });
 
+  await users.updateEmailVerification({
+    userId: user.$id,
+    emailVerification: true,
+  });
+
   try {
     await tables.createRow({
       databaseId: cfg.dbId,

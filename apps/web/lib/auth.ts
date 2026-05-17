@@ -1,8 +1,8 @@
 "use client";
 
 import type { Models } from "appwrite";
-import { ExecutionMethod } from "appwrite";
-import { functions } from "./appwrite";
+import { ExecutionMethod, OAuthProvider } from "appwrite";
+import { account, functions } from "./appwrite";
 
 type ErrorCode =
   | "EMAIL_EXISTS"
@@ -195,6 +195,20 @@ export async function login(email: string, password: string) {
   }
 
   return data?.user ?? null;
+}
+
+export function loginWithGoogle() {
+  const origin = window.location.origin;
+  try {
+    account.createOAuth2Token({
+      provider: OAuthProvider.Google,
+      success: `${origin}/api/auth/oauth/callback`,
+      failure: `${origin}/auth/signin?oauth=failed`,
+      scopes: ["email", "profile"]
+    });
+  } catch {
+    window.location.assign("/auth/signin?oauth=start_failed");
+  }
 }
 
 export async function logout() {
