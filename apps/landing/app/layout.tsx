@@ -1,5 +1,6 @@
 import { Inter, Fraunces } from "next/font/google";
 import "./globals.css";
+import { LenisProvider } from "./components/animations/useLenis";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -28,7 +29,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" className={`scroll-smooth ${inter.variable} ${fraunces.variable}`}>
       <body className="font-sans bg-background text-text-primary selection:bg-secondary/30 antialiased overflow-x-hidden">
-        {children}
+        <LenisProvider>
+          {children}
+        </LenisProvider>
       </body>
     </html>
   );

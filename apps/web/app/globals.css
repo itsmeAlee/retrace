@@ -1,17 +1,114 @@
 @import "tailwindcss";
 @source "../../../packages/ui/src";
+@source "../components";
+@source "../app";
 
 @theme {
-  --color-background: #F7F6F3;
+  --color-bg: #F7F6F3;
   --color-surface: #FFFFFF;
   --color-primary: #1A3C34;
-  --color-secondary: #D4A843;
+  --color-primary-hover: #0F2D25;
+  --color-accent: #D4A843;
   --color-text-primary: #111111;
-  --color-text-secondary: #6B6B6B;
+  --color-text-muted: #6B6B6B;
   --color-border: #E4E2DC;
+  --color-error: #C0392B;
+  --color-success: #27AE60;
+  --color-border-hover: #C8C5BE;
+  --color-draft-text: #92700A;
+  --color-surface-hover: #FAFAF8;
+  --color-neutral-soft: #F0EEE9;
+
+  --font-heading: var(--font-fraunces);
+  --font-body: var(--font-inter);
+
+  --text-xs: 12px;
+  --text-xs--line-height: 1.2;
+  --text-sm: 13px;
+  --text-sm--line-height: 1.2;
+  --text-base: 15px;
+  --text-base--line-height: 1.65;
+  --text-md: 16px;
+  --text-md--line-height: 1.65;
+  --text-lg: 18px;
+  --text-lg--line-height: 1.4;
+  --text-xl: 24px;
+  --text-xl--line-height: 1.15;
+  --text-auth-heading: 28px;
+  --text-auth-heading--line-height: 1.15;
+  --text-display: clamp(2rem, 3.5vw, 2.75rem);
+  --text-display--line-height: 1.15;
+  --text-display--letter-spacing: -0.02em;
+  --text-greeting: clamp(2rem, 3vw, 2.5rem);
+  --text-greeting--line-height: 1.15;
+  --text-greeting--letter-spacing: -0.02em;
+
+  --spacing-1: 4px;
+  --spacing-2: 8px;
+  --spacing-3: 12px;
+  --spacing-4: 16px;
+  --spacing-5: 20px;
+  --spacing-6: 24px;
+  --spacing-label-gap: 6px;
+  --spacing-7: 28px;
+  --spacing-8: 32px;
+  --spacing-10: 40px;
+  --spacing-12: 48px;
+  --spacing-16: 64px;
+  --spacing-sidebar: 220px;
+  --spacing-auth-form: 400px;
+  --spacing-auth-left-min: 480px;
+  --spacing-modal: 480px;
+  --spacing-settings: 560px;
+  --spacing-detail-panel: 280px;
+  --spacing-session-card: 260px;
+  --spacing-auth-control: 48px;
+  --spacing-secondary-control: 36px;
+  --spacing-icon-lg: 40px;
+  --spacing-icon-md: 36px;
+  --spacing-indicator: 16px;
+  --spacing-otp-w: 52px;
+  --spacing-otp-h: 60px;
+  --spacing-bottom-tab: 60px;
+
+  --radius-note: 6px;
+  --radius-form: 8px;
+  --radius-row: 10px;
+  --radius-card: 12px;
+  --radius-modal: 16px;
+  --radius-pill: 999px;
+
+  --shadow-card: 0 1px 3px rgba(0,0,0,0.06);
+  --shadow-card-hover: 0 4px 16px rgba(0,0,0,0.10);
+  --shadow-focus: 0 0 0 3px rgba(26,60,52,0.10);
+  --shadow-error-focus: 0 0 0 3px rgba(192,57,43,0.10);
 }
 
 body {
-  background: var(--color-background);
+  background: var(--color-bg);
   color: var(--color-text-primary);
+  font-family: var(--font-body), sans-serif;
+  letter-spacing: 0;
+}
+
+button,
+a,
+input {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+.font-heading {
+  font-family: var(--font-fraunces), Georgia, serif;
+}
+
+.font-body {
+  font-family: var(--font-inter), Arial, sans-serif;
 }

@@ -7,7 +7,7 @@ interface PlaceholderProps {
   className?: string;
 }
 
-export function Placeholder({ label, aspectRatio = "aspect-[4/3]", glowColor, className }: PlaceholderProps) {
+export function Placeholder({ label, aspectRatio = "aspect-video", glowColor, className }: PlaceholderProps) {
   return (
     <div className={cn("relative w-full", className)}>
       {glowColor && (
@@ -22,7 +22,7 @@ export function Placeholder({ label, aspectRatio = "aspect-[4/3]", glowColor, cl
           aspectRatio
         )}
       >
-        <p className="font-sans text-text-secondary font-medium tracking-wide text-center">
+        <p className="font-sans text-base leading-[1.65] text-text-secondary font-medium tracking-wide text-center">
           {label}
         </p>
       </div>

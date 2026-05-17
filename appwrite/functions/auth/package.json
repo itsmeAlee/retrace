@@ -1,0 +1,9 @@
+{
+  "name": "retrace-auth-functions",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "node-appwrite": "24.1.0"
+  }
+}

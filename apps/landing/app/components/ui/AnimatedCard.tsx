@@ -22,7 +22,9 @@ export function AnimatedCard({ children, className, delay = 0 }: AnimatedCardPro
       opacity: 1, 
       y: 0, 
       scale: 1,
-      transition: { duration: 0.55, ease: [0.22, 1, 0.36, 1] as const, delay }
+      transition: shouldReduceMotion
+        ? { duration: 0.2 }
+        : { duration: 0.55, ease: [0.22, 1, 0.36, 1] as const, delay }
     },
     hover: {
       scale: shouldReduceMotion ? 1 : 1.04,
@@ -54,7 +56,7 @@ export const CardTitle = ({ children, className }: { children: React.ReactNode; 
       variants={{
         hover: { y: shouldReduceMotion ? 0 : -4, transition: { duration: 0.22, ease: "easeOut" as const } }
       }}
-      className={cn("font-serif text-xl md:text-2xl font-semibold mb-4 text-primary", className)}
+      className={cn("font-serif text-body-lg font-semibold mb-4 text-primary", className)}
     >
       {children}
     </motion.h3>
@@ -69,7 +71,7 @@ export const CardDescription = ({ children, className }: { children: React.React
         visible: { opacity: 0.7 },
         hover: { opacity: 1, transition: { duration: 0.22, ease: "easeOut" as const } }
       }}
-      className={cn("font-sans text-base text-text-secondary", className)}
+      className={cn("font-sans text-base leading-[1.65] font-normal text-text-secondary", className)}
     >
       {children}
     </motion.p>

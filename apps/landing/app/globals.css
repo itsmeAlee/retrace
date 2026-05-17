@@ -20,6 +20,26 @@
   --spacing-container-max: 1200px;
   --spacing-margin-mobile: 20px;
   --spacing-margin-desktop: 64px;
+
+  --text-display: clamp(2.8rem, 6vw, 5rem);
+  --text-display--line-height: 1.1;
+  --text-display--letter-spacing: -0.02em;
+  --text-heading: clamp(2rem, 4vw, 3.25rem);
+  --text-heading--line-height: 1.2;
+  --text-heading--letter-spacing: -0.01em;
+  --text-subhead: clamp(1.05rem, 2vw, 1.35rem);
+  --text-subhead--line-height: 1.6;
+  --text-body-lg: 1.125rem;
+  --text-body-lg--line-height: 1.65;
+  --text-label: 0.75rem;
+  --text-label--line-height: 1;
+  --text-label--letter-spacing: 0.1em;
+  --text-button: 0.9375rem;
+  --text-button--line-height: 1.5;
+}
+
+html {
+  font-size: 16px;
 }
 
 body {

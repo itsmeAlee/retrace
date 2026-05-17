@@ -4,7 +4,7 @@ import { AppWindow, StickyNote, Link2Off } from "lucide-react";
 export function ProblemSection() {
   return (
     <section className="max-w-[1200px] mx-auto px-5 md:px-16 py-32 text-center">
-      <h2 className="text-3xl md:text-4xl font-semibold font-serif text-primary mb-16">
+      <h2 className="text-heading font-semibold font-serif text-primary mb-16">
         Your work lives in 40 tabs.<br/>
         <span className="text-secondary">Your context lives nowhere.</span>
       </h2>

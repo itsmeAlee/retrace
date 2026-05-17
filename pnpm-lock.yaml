@@ -57,6 +57,9 @@ importers:
       clsx:
         specifier: ^2.1.1
         version: 2.1.1
+      lenis:
+        specifier: ^1.3.23
+        version: 1.3.23(react@18.3.1)
       lucide-react:
         specifier: ^1.16.0
         version: 1.16.0(react@18.3.1)
@@ -109,9 +112,18 @@ importers:
       '@retrace/ui':
         specifier: workspace:*
         version: link:../../packages/ui
+      appwrite:
+        specifier: 25.0.0
+        version: 25.0.0
+      framer-motion:
+        specifier: ^12.38.0
+        version: 12.38.0(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       next:
         specifier: ^14.2.35
         version: 14.2.35(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      node-appwrite:
+        specifier: ^24.1.0
+        version: 24.1.0
       react:
         specifier: ^18.3.1
         version: 18.3.1
@@ -1043,6 +1055,10 @@ packages:
     resolution: {integrity: sha512-4Dj6M28JB+oAH8kFkTLUo+a2jwOFkuqb3yucU0CANcRRUbxS0cP0nZYCGjcc3BNXwRIsUVmDGgzawme7zvJHvg==}
     engines: {node: '>=12'}
 
+  appwrite@25.0.0:
+    resolution: {integrity: sha512-ZoNhS02x4Bfcur8MQCnZvskrSciSKwKlL+FZOmGtLr6g+1FyEyZufEgOaynStOsqHSlmyUywvluWYH5eLda9Pw==}
+    engines: {node: '>=18.0.0'}
+
   argparse@2.0.1:
     resolution: {integrity: sha512-8+9WqebbFzpX9OR+Wa6O29asIogeRMzcGtAINdpMHHyAg10f05aSFVBbcEqGf/PXw1EjAZ+q2/bEBg3DvurK3Q==}
 
@@ -1128,6 +1144,9 @@ packages:
   balanced-match@4.0.4:
     resolution: {integrity: sha512-BLrgEcRTwX2o6gGxGOCNyMvGSp35YofuYzw9h1IMTRmKqttAZZVU67bdb9Pr2vUHA8+j3i2tJfjO6C6+4myGTA==}
     engines: {node: 18 || 20 || >=22}
+
+  bignumber.js@9.3.1:
+    resolution: {integrity: sha512-Ko0uX15oIUS7wJ3Rb30Fs6SkVbLmPBAKdlm7q9+ak9bbIeFf0MwuBsQV6z7+X768/cHsfg+WlysDWJcmthjsjQ==}
 
   bluebird@3.7.2:
     resolution: {integrity: sha512-XpNj6GDQzdfW+r2Wnn7xiSAd7TM3jzkxGXBGTtWKuSXv1xUV+azxAm8jdWZN06QTQk+2N2XB9jRDkvbmQmcRtg==}
@@ -2134,6 +2153,9 @@ packages:
     resolution: {integrity: sha512-qQKT4zQxXl8lLwBtHMWwaTcGfFOZviOJet3Oy/xmGk2gZH677CJM9EvtfdSkgWcATZhj/55JZ0rmy3myCT5lsA==}
     hasBin: true
 
+  json-bigint@1.0.0:
+    resolution: {integrity: sha512-SiPv/8VpZuWbvLSMtTDU8hEfrZWg/mH/nV/b4o0CYbSxu1UIQPLdwKOCIyLQX+VIPO5vrLX3i8qtqFyhdPSUSQ==}
+
   json-buffer@3.0.1:
     resolution: {integrity: sha512-4bV5BfR2mqfQTJm+V5tPPdf+ZpuhiIvTuAB5g8kcrXOZpTT/QwwVRWBywX1ozr6lEuPdbHxwaJlm9G6mI2sfSQ==}
 
@@ -2197,6 +2219,20 @@ packages:
   latest-version@9.0.0:
     resolution: {integrity: sha512-7W0vV3rqv5tokqkBAFV1LbR7HPOWzXQDpDgEuib/aJ1jsZZx6x3c2mBI+TJhJzOhkGeaLbCKEHXEXLfirtG2JA==}
     engines: {node: '>=18'}
+
+  lenis@1.3.23:
+    resolution: {integrity: sha512-YxYq3TJqj9sJNv0V9SkyQHejt14xwyIwgDaaMK89Uf9SxQfIszu+gTQSSphh6BWlLTNVKvvXAGkg+Zf+oFIevg==}
+    peerDependencies:
+      '@nuxt/kit': '>=3.0.0'
+      react: '>=17.0.0'
+      vue: '>=3.0.0'
+    peerDependenciesMeta:
+      '@nuxt/kit':
+        optional: true
+      react:
+        optional: true
+      vue:
+        optional: true
 
   levn@0.4.1:
     resolution: {integrity: sha512-+bT2uH4E5LGE7h/n3evcS/sQlJXCpIp6ym8OWJ5eV6+67Dsql/LaaT7qJBAt2rzfoa/5QBGBhxDix1dMt2kQKQ==}
@@ -2453,9 +2489,15 @@ packages:
       sass:
         optional: true
 
+  node-appwrite@24.1.0:
+    resolution: {integrity: sha512-Kv3ftw2C3Hue2QBjqsqsPG9SOuTh+Dz3WJ4xnuVNl/KiE314eIIeJj5TgKXiCUbXBEeJkz51xsFzxkMBdY/tqg==}
+
   node-exports-info@1.6.0:
     resolution: {integrity: sha512-pyFS63ptit/P5WqUkt+UUfe+4oevH+bFeIiPPdfb0pFeYEu/1ELnJu5l+5EcTKYL5M7zaAa7S8ddywgXypqKCw==}
     engines: {node: '>= 0.4'}
+
+  node-fetch-native-with-agent@1.7.2:
+    resolution: {integrity: sha512-5MaOOCuJEvcckoz7/tjdx1M6OusOY6Xc5f459IaruGStWnKzlI1qpNgaAwmn4LmFYcsSlj+jBMk84wmmRxfk5g==}
 
   node-fetch-native@1.6.7:
     resolution: {integrity: sha512-g9yhqoedzIUm0nTnTqAQvueMPVOuIY16bqgAJJC8XOOubYFNwz6IER9qs0Gq2Xd0+CecCKFjtdDTMA4u4xG06Q==}
@@ -4023,6 +4065,10 @@ snapshots:
 
   ansi-styles@6.2.3: {}
 
+  appwrite@25.0.0:
+    dependencies:
+      json-bigint: 1.0.0
+
   argparse@2.0.1: {}
 
   aria-query@5.3.2: {}
@@ -4126,6 +4172,8 @@ snapshots:
   balanced-match@1.0.2: {}
 
   balanced-match@4.0.4: {}
+
+  bignumber.js@9.3.1: {}
 
   bluebird@3.7.2: {}
 
@@ -5254,6 +5302,10 @@ snapshots:
     dependencies:
       argparse: 2.0.1
 
+  json-bigint@1.0.0:
+    dependencies:
+      bignumber.js: 9.3.1
+
   json-buffer@3.0.1: {}
 
   json-parse-even-better-errors@3.0.2: {}
@@ -5329,6 +5381,10 @@ snapshots:
   latest-version@9.0.0:
     dependencies:
       package-json: 10.0.1
+
+  lenis@1.3.23(react@18.3.1):
+    optionalDependencies:
+      react: 18.3.1
 
   levn@0.4.1:
     dependencies:
@@ -5560,12 +5616,19 @@ snapshots:
       - '@babel/core'
       - babel-plugin-macros
 
+  node-appwrite@24.1.0:
+    dependencies:
+      json-bigint: 1.0.0
+      node-fetch-native-with-agent: 1.7.2
+
   node-exports-info@1.6.0:
     dependencies:
       array.prototype.flatmap: 1.3.3
       es-errors: 1.3.0
       object.entries: 1.1.9
       semver: 6.3.1
+
+  node-fetch-native-with-agent@1.7.2: {}
 
   node-fetch-native@1.6.7: {}
 
