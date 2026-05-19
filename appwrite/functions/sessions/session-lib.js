@@ -1,7 +1,8 @@
-import { Account, Client, ID, Permission, Query, Role, TablesDB } from 'node-appwrite';
+import { Account, Client, ID, Permission, Query, Role, Storage, TablesDB } from 'node-appwrite';
+import { InputFile } from 'node-appwrite/file';
 
 const STATUS_VALUES = new Set(['active', 'paused', 'completed', 'archived']);
-const CAPTURE_TYPES = new Set(['text', 'url', 'video', 'note', 'audio']);
+const CAPTURE_TYPES = new Set(['text', 'url', 'video', 'pdf', 'image', 'file']);
 
 export function env(name, fallback = undefined) {
   const value = process.env[name] ?? fallback;
@@ -18,6 +19,9 @@ export function config() {
     dbId: env('DB_ID'),
     sessionsTableId: env('SESSIONS_COL_ID'),
     capturesTableId: env('CAPTURE_ITEMS_COL_ID'),
+    captureDetailsTableId: process.env.CAPTURE_DETAILS_COL_ID ?? 'capture_details',
+    captureDetailsBucketId: process.env.CAPTURE_DETAILS_BUCKET_ID ?? 'capture-details',
+    sessionFilesBucketId: process.env.SESSION_FILES_BUCKET_ID ?? 'session-files',
     appUrl: process.env.APP_URL ?? '*',
   };
 }
@@ -62,15 +66,21 @@ export async function withHandler(name, context, methods, handler) {
       return fail(context.res, headers, 401, 'UNAUTHORIZED', 'Sign in is required.');
     }
 
-    const { account, tables } = services(cfg, jwt);
+    const { account, storage, tables } = services(cfg, jwt);
     const user = await account.get();
     const body = parseBody(context.req);
     const query = parseQuery(context.req);
-    const result = await handler({ ...context, body, cfg, headers, query, tables, user });
+    const result = await handler({ ...context, body, cfg, headers, query, storage, tables, user });
     context.log(`${name} completed in ${Date.now() - startedAt}ms`);
     return result;
   } catch (err) {
     context.error(`${name} failed in ${Date.now() - startedAt}ms: ${safeError(err)}`);
+    if (err?.status === 413) {
+      return fail(context.res, headers, 413, 'PAYLOAD_TOO_LARGE', 'Capture details are too large.');
+    }
+    if (err?.status === 403) {
+      return fail(context.res, headers, 403, 'FORBIDDEN', 'You do not have access to this resource.');
+    }
     return fail(context.res, headers, 500, 'INTERNAL_ERROR', 'Something went wrong. Please try again.');
   }
 }
@@ -83,6 +93,7 @@ function services(cfg, jwt) {
 
   return {
     account: new Account(client),
+    storage: new Storage(client),
     tables: new TablesDB(client),
   };
 }
@@ -153,6 +164,111 @@ export function rowPermissions(userId) {
     Permission.update(Role.user(userId)),
     Permission.delete(Role.user(userId)),
   ];
+}
+
+export function filePermissions(userId) {
+  return rowPermissions(userId);
+}
+
+export function previewText(value, max = 600) {
+  const cleaned = String(value ?? '').trim().replace(/\s+/g, ' ');
+  if (cleaned.length <= max) {
+    return cleaned;
+  }
+  return `${cleaned.slice(0, Math.max(0, max - 3)).trim()}...`;
+}
+
+export function detailPayloadFromBody(body) {
+  const payload = {};
+  if (body.fullContent !== undefined) payload.fullContent = String(body.fullContent ?? '').trim();
+  if (body.markerNote !== undefined) payload.markerNote = String(body.markerNote ?? '').trim();
+  if (body.aiSummary !== undefined) payload.aiSummary = body.aiSummary === null ? null : String(body.aiSummary ?? '').trim();
+  return payload;
+}
+
+export function hasDetailPayload(details) {
+  return Object.values(details).some((value) => value !== undefined && value !== null && String(value).trim() !== '');
+}
+
+export async function upsertCaptureDetails({ cfg, storage, tables, userId, sessionId, captureId, details }) {
+  const now = nowIso();
+  const encoded = JSON.stringify({ ...details, updatedAt: now });
+  if (Buffer.byteLength(encoded, 'utf8') > 5 * 1024 * 1024) {
+    const error = new Error('Capture details are too large.');
+    error.status = 413;
+    throw error;
+  }
+
+  let existing = null;
+  try {
+    existing = await tables.getRow({
+      databaseId: cfg.dbId,
+      tableId: cfg.captureDetailsTableId,
+      rowId: captureId,
+    });
+  } catch {
+    existing = null;
+  }
+
+  if (existing?.detailsFileId) {
+    await storage.deleteFile({
+      bucketId: cfg.captureDetailsBucketId,
+      fileId: existing.detailsFileId,
+    }).catch(() => undefined);
+  }
+
+  const file = await storage.createFile({
+    bucketId: cfg.captureDetailsBucketId,
+    fileId: ID.unique(),
+    file: InputFile.fromPlainText(encoded, `${captureId}.json`),
+    permissions: filePermissions(userId),
+  });
+
+  const rowData = {
+    sessionId,
+    userId,
+    detailsFileId: file.$id,
+    detailsSize: Buffer.byteLength(encoded, 'utf8'),
+    updatedAt: now,
+  };
+
+  if (existing) {
+    return tables.updateRow({
+      databaseId: cfg.dbId,
+      tableId: cfg.captureDetailsTableId,
+      rowId: captureId,
+      data: rowData,
+    });
+  }
+
+  return tables.createRow({
+    databaseId: cfg.dbId,
+    tableId: cfg.captureDetailsTableId,
+    rowId: captureId,
+    data: { ...rowData, createdAt: now },
+    permissions: rowPermissions(userId),
+  });
+}
+
+export async function getCaptureDetails({ cfg, storage, tables, captureId, userId }) {
+  const row = await tables.getRow({
+    databaseId: cfg.dbId,
+    tableId: cfg.captureDetailsTableId,
+    rowId: captureId,
+  });
+
+  if (row.userId !== userId) {
+    const error = new Error('Details belong to another user.');
+    error.status = 403;
+    throw error;
+  }
+
+  const buffer = await storage.getFileDownload({
+    bucketId: cfg.captureDetailsBucketId,
+    fileId: row.detailsFileId,
+  });
+  const text = new TextDecoder().decode(buffer);
+  return JSON.parse(text || '{}');
 }
 
 export async function getOwnedSession({ tables, cfg, sessionId, userId }) {

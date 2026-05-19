@@ -11,7 +11,7 @@ export default async (context) =>
 
     const queries = [
       Query.equal('sessionId', sessionId),
-      Query.orderDesc('createdAt'),
+      Query.orderAsc('createdAt'),
       Query.limit(toPositiveInt(query.limit, 20, 100)),
       Query.offset(toPositiveInt(query.offset, 0, 10000)),
     ];

@@ -1,7 +1,7 @@
 import "server-only";
 
 import type { Models } from "node-appwrite";
-import { Account, Client, Users } from "node-appwrite";
+import { Account, Client, Storage, Users } from "node-appwrite";
 
 function requiredEnv(name: string, fallback?: string) {
   const value = process.env[name] ?? fallback;
@@ -42,6 +42,10 @@ export async function markEmailVerified(userId: string) {
 
 export function createSessionAccount(sessionSecret: string) {
   return new Account(baseClient().setSession(sessionSecret));
+}
+
+export function createSessionStorage(sessionSecret: string) {
+  return new Storage(baseClient().setSession(sessionSecret));
 }
 
 export async function ensureEmailVerified(user: Models.User<Models.Preferences>) {

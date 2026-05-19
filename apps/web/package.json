@@ -14,6 +14,7 @@
     "@retrace/ui": "workspace:*",
     "appwrite": "25.0.0",
     "framer-motion": "^12.38.0",
+    "groq-sdk": "^1.2.0",
     "next": "^14.2.35",
     "node-appwrite": "^24.1.0",
     "react": "^18.3.1",
