@@ -8,6 +8,7 @@ import { DocumentWorkspace } from "../../../components/app/DocumentWorkspace";
 import { NavigatorPanel } from "../../../components/app/NavigatorPanel";
 import { Icon } from "../../../components/Icon";
 import { Toast } from "../../../components/ui/Toast";
+import { deleteFile } from "../../../lib/storage";
 import {
   getSession,
   getSessionNote,
@@ -128,7 +129,7 @@ export default function SessionDetailPage() {
   };
 
   const handleAttachmentAdded = (item: CaptureItem) => {
-    const key = item.checkpointId || "session";
+    const key = item.checkpointId?.trim() || "session";
     setAttachmentsMap((prev) => ({
       ...prev,
       [key]: [...(prev[key] || []), item]
@@ -137,33 +138,47 @@ export default function SessionDetailPage() {
     getAllSessionSources(sessionId).then(setSources);
   };
 
-  const handleAttachmentDeleted = async (id: string) => {
-    // Delete via direct database document deletion
+  const handleAttachmentDeleted = (item: CaptureItem) => {
+    const previousAttachments = attachmentsMap;
+    const previousSources = sources;
+
+    setAttachmentsMap((prev) => {
+      const next = { ...prev };
+      Object.keys(next).forEach((key) => {
+        next[key] = next[key].filter((attachment) => attachment.$id !== item.$id);
+      });
+      return next;
+    });
+    setSources((prev) => prev.filter((source) => source.$id !== item.$id));
+
+    void deleteAttachmentInBackground(item, previousAttachments, previousSources);
+  };
+
+  const deleteAttachmentInBackground = async (
+    item: CaptureItem,
+    previousAttachments: Record<string, CaptureItem[]>,
+    previousSources: CaptureItem[]
+  ) => {
     try {
       const { appwriteClient } = await import("../../../lib/appwrite");
       const { Databases } = await import("appwrite");
       const response = await fetch("/api/auth/jwt", { method: "POST" });
-      if (!response.ok) return;
+      if (!response.ok) throw new Error("Missing auth session.");
       const data = await response.json();
-      if (!data.jwt) return;
+      if (!data.jwt) throw new Error("Missing auth session.");
 
       const client = appwriteClient.setJWT(data.jwt);
       const db = new Databases(client);
-      await db.deleteDocument("retrace_auth", "capture_items", id);
+      await db.deleteDocument("retrace_auth", "capture_items", item.$id);
+      if (item.fileId) {
+        await deleteFile(item.fileId).catch(() => {});
+      }
 
-      // Remove from state
-      setAttachmentsMap((prev) => {
-        const next = { ...prev };
-        Object.keys(next).forEach((key) => {
-          next[key] = next[key].filter((item) => item.$id !== id);
-        });
-        return next;
-      });
-
-      // Refresh sources
       getAllSessionSources(sessionId).then(setSources);
       setToast("Attachment deleted.");
     } catch {
+      setAttachmentsMap(previousAttachments);
+      setSources(previousSources);
       setToast("Could not delete attachment.");
     }
   };

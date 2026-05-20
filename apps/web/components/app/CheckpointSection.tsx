@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Icon } from "../Icon";
+import { InlineMediaList } from "./InlineMediaList";
 import { NoteArea } from "./NoteArea";
 import {
   renameCheckpoint,
@@ -20,7 +21,7 @@ interface CheckpointSectionProps {
   onToggle: () => void;
   onUpdate: () => void;
   onAttachmentAdded: (item: CaptureItem) => void;
-  onAttachmentDeleted: (id: string) => void;
+  onAttachmentDeleted: (item: CaptureItem) => void;
 }
 
 export function CheckpointSection({
@@ -297,53 +298,7 @@ function CheckpointReadOnlyContent({
       ) : (
         <p className="text-sm italic leading-relaxed text-text-muted">No notes captured in this checkpoint.</p>
       )}
-      {attachments.length > 0 && <ReadOnlyAttachmentChips attachments={attachments} />}
-    </div>
-  );
-}
-
-function ReadOnlyAttachmentChips({ attachments }: { attachments: CaptureItem[] }) {
-  return (
-    <div className="mt-4 flex flex-wrap gap-2 border-t border-border pt-3">
-      {attachments.map((item) => {
-        const isImg = item.type === "image";
-        const isLink = item.type === "url";
-        const isAudio = item.type === "audio";
-
-        let chipIcon: "image" | "link" | "mic" | "document" = "document";
-        if (isImg) chipIcon = "image";
-        else if (isLink) chipIcon = "link";
-        else if (isAudio) chipIcon = "mic";
-
-        const label = isLink ? item.sourceTitle || item.content : item.fileName || item.content;
-        const isClickable = isLink && item.sourceUrl;
-        const className =
-          "inline-flex max-w-xs items-center gap-2 rounded-pill border border-border bg-surface py-1 pl-2.5 pr-2.5 text-xs font-medium text-text-primary shadow-card transition-colors";
-
-        if (isClickable) {
-          return (
-            <button
-              key={item.$id}
-              onClick={(event) => {
-                event.stopPropagation();
-                window.open(item.sourceUrl, "_blank");
-              }}
-              className={`${className} hover:border-primary/40 hover:text-primary`}
-              type="button"
-            >
-              <Icon name={chipIcon} className="h-3.5 w-3.5 flex-shrink-0 text-primary" />
-              <span className="truncate">{label}</span>
-            </button>
-          );
-        }
-
-        return (
-          <span key={item.$id} className={className}>
-            <Icon name={chipIcon} className="h-3.5 w-3.5 flex-shrink-0 text-primary" />
-            <span className="truncate">{label}</span>
-          </span>
-        );
-      })}
+      <InlineMediaList attachments={attachments} />
     </div>
   );
 }

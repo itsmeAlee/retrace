@@ -21,7 +21,7 @@ interface DocumentWorkspaceProps {
   onToggleCheckpoint: (id: string) => void;
   onRefresh: () => void;
   onAttachmentAdded: (item: CaptureItem) => void;
-  onAttachmentDeleted: (id: string) => void;
+  onAttachmentDeleted: (item: CaptureItem) => void;
   onCheckpointCreated: (id: string) => void;
   checkpointRefs: React.MutableRefObject<Record<string, HTMLDivElement | null>>;
 }

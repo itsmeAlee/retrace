@@ -4,15 +4,13 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Icon } from "../Icon";
 import { addAttachment, type CaptureItem, type CaptureType } from "../../lib/sessions";
-import { uploadFile } from "../../lib/storage";
+import { deleteFile, uploadFile } from "../../lib/storage";
 import { useVoiceRecorder } from "../../hooks/useVoiceRecorder";
 
 interface AttachmentToolbarProps {
   sessionId: string;
   checkpointId: string | null;
   onAttachmentAdded: (item: CaptureItem) => void;
-  onAttachmentDeleted?: (id: string) => void;
-  attachments?: CaptureItem[];
   onTranscript?: (text: string) => Promise<void> | void;
   saveStatusSlot?: React.ReactNode;
 }
@@ -21,8 +19,6 @@ export function AttachmentToolbar({
   sessionId,
   checkpointId,
   onAttachmentAdded,
-  onAttachmentDeleted,
-  attachments = [],
   onTranscript,
   saveStatusSlot
 }: AttachmentToolbarProps) {
@@ -31,6 +27,7 @@ export function AttachmentToolbar({
   const [urlValue, setUrlValue] = useState("");
   const [isFetchingUrl, setIsFetchingUrl] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadStage, setUploadStage] = useState<"idle" | "uploading" | "saving">("idle");
   const [isUploadingFile, setIsUploadingFile] = useState(false);
   const [toastMessage, setToastMessage] = useState("");
   const [isTranscribing, setIsTranscribing] = useState(false);
@@ -49,21 +46,28 @@ export function AttachmentToolbar({
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Enforce 5MB limit
-    if (file.size > 5 * 1024 * 1024) {
-      triggerToast("Files must be 5MB or smaller.");
+    const isImage = file.type.startsWith("image/");
+    const maxSize = isImage ? 2 * 1024 * 1024 : 5 * 1024 * 1024;
+    if (file.size > maxSize) {
+      triggerToast(isImage ? "Images must be 2MB or smaller." : "Files must be 5MB or smaller.");
       if (fileInputRef.current) fileInputRef.current.value = "";
       return;
     }
 
     setIsUploadingFile(true);
     setUploadProgress(0);
+    setUploadStage("uploading");
+    let uploadedFileId = "";
 
     try {
-      const uploaded = await uploadFile(file, sessionId, setUploadProgress);
-      const isImg = file.type.startsWith("image/");
-      const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
-      const captureType: CaptureType = isImg ? "image" : isPdf ? "pdf" : "file";
+      const uploaded = await uploadFile(file, sessionId, (progress) => {
+        setUploadProgress(progress);
+        setUploadStage("uploading");
+      });
+      uploadedFileId = uploaded.fileId;
+      setUploadProgress(100);
+      setUploadStage("saving");
+      const captureType: CaptureType = "file";
 
       const created = await addAttachment(sessionId, checkpointId, captureType, {
         content: file.name,
@@ -71,15 +75,20 @@ export function AttachmentToolbar({
         fileName: file.name,
         fileId: uploaded.fileId,
         fileMimeType: file.type,
-        fileSize: file.size
+        fileSize: file.size,
+        userId: uploaded.userId
       });
 
       onAttachmentAdded(created);
       triggerToast("File uploaded successfully.");
     } catch (err: any) {
+      if (uploadedFileId) {
+        void deleteFile(uploadedFileId).catch(() => {});
+      }
       triggerToast(err?.message || "Failed to upload file.");
     } finally {
       setIsUploadingFile(false);
+      setUploadStage("idle");
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
@@ -88,16 +97,15 @@ export function AttachmentToolbar({
     e.preventDefault();
     if (!urlValue.trim()) return;
 
-    let targetUrl = urlValue.trim();
-    if (!/^https?:\/\//i.test(targetUrl)) {
-      targetUrl = "https://" + targetUrl;
+    const targetUrl = normalizeUrlInput(urlValue);
+    if (!targetUrl) {
+      triggerToast("Enter a valid HTTPS URL.");
+      return;
     }
 
     setIsFetchingUrl(true);
     try {
-      const res = await fetch(`/api/fetch-title?url=${encodeURIComponent(targetUrl)}`);
-      const data = await res.json();
-      const title = data.title || new URL(targetUrl).hostname;
+      const title = await resolveUrlTitle(targetUrl);
 
       const created = await addAttachment(sessionId, checkpointId, "url", {
         content: targetUrl,
@@ -110,21 +118,7 @@ export function AttachmentToolbar({
       setIsUrlInputOpen(false);
       triggerToast("Link attached successfully.");
     } catch (err: any) {
-      // Fallback
-      try {
-        const title = new URL(targetUrl).hostname;
-        const created = await addAttachment(sessionId, checkpointId, "url", {
-          content: targetUrl,
-          sourceUrl: targetUrl,
-          sourceTitle: title
-        });
-        onAttachmentAdded(created);
-        setUrlValue("");
-        setIsUrlInputOpen(false);
-        triggerToast("Link attached using hostname.");
-      } catch {
-        triggerToast("Invalid URL.");
-      }
+      triggerToast(err?.message || "Could not attach this link.");
     } finally {
       setIsFetchingUrl(false);
     }
@@ -316,7 +310,9 @@ export function AttachmentToolbar({
                 <div className="w-16 bg-border h-1 rounded-full overflow-hidden">
                   <div className="bg-primary h-full transition-all duration-300" style={{ width: `${uploadProgress}%` }} />
                 </div>
-                <span className="text-xs text-text-primary font-medium">{uploadProgress}%</span>
+                <span className="text-xs text-text-primary font-medium">
+                  {uploadStage === "saving" ? "Saving..." : `${uploadProgress}%`}
+                </span>
               </motion.div>
             )}
           </AnimatePresence>
@@ -357,47 +353,6 @@ export function AttachmentToolbar({
         )}
       </AnimatePresence>
 
-      {/* Attachments Chip Arrays */}
-      {attachments.length > 0 && (
-        <div className="flex flex-wrap gap-2 mt-3.5">
-          {attachments.map((item) => {
-            const isImg = item.type === "image";
-            const isLink = item.type === "url";
-            const isAudio = item.type === "audio";
-            
-            let chipIcon: "image" | "link" | "mic" | "document" = "document";
-            if (isImg) chipIcon = "image";
-            else if (isLink) chipIcon = "link";
-            else if (isAudio) chipIcon = "mic";
-
-            return (
-              <motion.div
-                key={item.$id}
-                layout
-                initial={{ scale: 0.95, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                exit={{ scale: 0.95, opacity: 0 }}
-                className="flex items-center gap-2 bg-white border border-border rounded-full py-1 pl-2.5 pr-2.5 text-xs text-text-primary font-medium shadow-[0_1px_2px_rgba(0,0,0,0.02)] max-w-xs group"
-              >
-                <Icon name={chipIcon} className="h-3.5 w-3.5 text-primary flex-shrink-0" />
-                <span className="truncate flex-1">
-                  {isLink ? (item.sourceTitle || item.content) : item.content}
-                </span>
-                {onAttachmentDeleted && (
-                  <button
-                    onClick={() => onAttachmentDeleted(item.$id)}
-                    className="text-text-muted hover:text-error transition-colors p-0.5"
-                    type="button"
-                  >
-                    <Icon name="x" className="h-3 w-3" />
-                  </button>
-                )}
-              </motion.div>
-            );
-          })}
-        </div>
-      )}
-
       {/* Floating Toast Notification inside toolbar area */}
       <AnimatePresence>
         {toastMessage && (
@@ -413,4 +368,53 @@ export function AttachmentToolbar({
       </AnimatePresence>
     </div>
   );
+}
+
+function normalizeUrlInput(value: string) {
+  const withProtocol = /^https?:\/\//i.test(value.trim()) ? value.trim() : `https://${value.trim()}`;
+  try {
+    const url = new URL(withProtocol);
+    if (url.protocol !== "https:") return "";
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
+
+async function resolveUrlTitle(targetUrl: string) {
+  const fallbackTitle = titleFallback(targetUrl);
+  if (isYouTubeUrl(targetUrl)) return fallbackTitle;
+
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 1500);
+  try {
+    const res = await fetch(`/api/fetch-title?url=${encodeURIComponent(targetUrl)}`, {
+      signal: controller.signal
+    });
+    const data = (await res.json().catch(() => null)) as { title?: string } | null;
+    return data?.title?.trim() || fallbackTitle;
+  } catch {
+    return fallbackTitle;
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
+function titleFallback(targetUrl: string) {
+  try {
+    const url = new URL(targetUrl);
+    if (isYouTubeUrl(targetUrl)) return "YouTube video";
+    return url.hostname.replace(/^www\./, "");
+  } catch {
+    return targetUrl;
+  }
+}
+
+function isYouTubeUrl(targetUrl: string) {
+  try {
+    const host = new URL(targetUrl).hostname.replace(/^www\./, "");
+    return host === "youtube.com" || host === "m.youtube.com" || host === "youtu.be" || host === "youtube-nocookie.com";
+  } catch {
+    return false;
+  }
 }

@@ -3,7 +3,9 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { AttachmentToolbar } from "./AttachmentToolbar";
-import { type CaptureItem } from "../../lib/sessions";
+import { InlineMediaList } from "./InlineMediaList";
+import { addAttachment, type CaptureItem } from "../../lib/sessions";
+import { deleteFile, uploadFile } from "../../lib/storage";
 
 interface NoteAreaProps {
   sessionId: string;
@@ -15,7 +17,7 @@ interface NoteAreaProps {
   placeholder?: string;
   attachments?: CaptureItem[];
   onAttachmentAdded: (item: CaptureItem) => void;
-  onAttachmentDeleted?: (id: string) => void;
+  onAttachmentDeleted?: (item: CaptureItem) => void;
 }
 
 export function NoteArea({
@@ -39,19 +41,23 @@ export function NoteArea({
   const localStorageKey = checkpointId ? `retrace_note_checkpoint_${checkpointId}` : `retrace_note_session_${sessionId}`;
   const [value, setValue] = useState(initialValue);
   const [saveError, setSaveError] = useState("");
+  const [mediaStatus, setMediaStatus] = useState("");
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
   const [showSavedStatus, setShowSavedStatus] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const afterTextareaRef = useRef<HTMLTextAreaElement>(null);
   const debouncedSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const documentKey = checkpointId ?? `session:${sessionId}`;
   const documentKeyRef = useRef(documentKey);
   const localStorageKeyRef = useRef(localStorageKey);
+  const mediaBoundaryKeyRef = useRef(`${localStorageKey}:media_boundary`);
   const valueRef = useRef(initialValue);
   const lastSavedValueRef = useRef(initialValue);
   const focusedRef = useRef(false);
   const dirtyRef = useRef(false);
   const saveVersionRef = useRef(0);
   const onSaveRef = useRef(onSave);
+  const [mediaBoundary, setMediaBoundary] = useState<number | null>(null);
 
   useEffect(() => {
     onSaveRef.current = onSave;
@@ -91,6 +97,26 @@ export function NoteArea({
     if (!value) return 0;
     const time = new Date(value).getTime();
     return Number.isFinite(time) ? time : 0;
+  }, []);
+
+  const readMediaBoundary = useCallback((key: string, content: string) => {
+    try {
+      const raw = window.localStorage.getItem(key);
+      if (!raw) return null;
+      const parsed = Number(raw);
+      if (!Number.isFinite(parsed)) return null;
+      return Math.max(0, Math.min(parsed, content.length));
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const writeMediaBoundary = useCallback((key: string, boundary: number) => {
+    try {
+      window.localStorage.setItem(key, String(boundary));
+    } catch {
+      // This only affects visual edit positioning; note content still saves normally.
+    }
   }, []);
 
   const saveNow = useCallback(
@@ -142,6 +168,7 @@ export function NoteArea({
     if (documentKeyRef.current !== documentKey) {
       documentKeyRef.current = documentKey;
       localStorageKeyRef.current = localStorageKey;
+      mediaBoundaryKeyRef.current = `${localStorageKey}:media_boundary`;
       const nextValue = hasNewerLocal && localBuffer ? localBuffer.content : initialValue;
       valueRef.current = nextValue;
       lastSavedValueRef.current = initialValue;
@@ -150,6 +177,7 @@ export function NoteArea({
       onValueChange?.(nextValue);
       setSaveError("");
       setSaveStatus(hasNewerLocal ? "local" : "saved");
+      setMediaBoundary(readMediaBoundary(`${localStorageKey}:media_boundary`, nextValue));
       if (hasNewerLocal && localBuffer) {
         void saveNow(localBuffer.content, localBuffer.updatedAt);
       } else if (localBuffer) {
@@ -164,6 +192,7 @@ export function NoteArea({
       setValue(localBuffer.content);
       onValueChange?.(localBuffer.content);
       setSaveStatus("local");
+      setMediaBoundary(readMediaBoundary(localStorageKeyRef.current + ":media_boundary", localBuffer.content));
       void saveNow(localBuffer.content, localBuffer.updatedAt);
       return;
     }
@@ -174,18 +203,20 @@ export function NoteArea({
       setValue(initialValue);
       onValueChange?.(initialValue);
       setSaveStatus("saved");
+      setMediaBoundary(readMediaBoundary(localStorageKeyRef.current + ":media_boundary", initialValue));
       if (localBuffer && !hasNewerLocal) {
         clearLocalBuffer(localStorageKey);
       }
     }
-  }, [clearLocalBuffer, documentKey, initialUpdatedAt, initialValue, localStorageKey, onValueChange, readLocalBuffer, saveNow, timestampMs]);
+  }, [clearLocalBuffer, documentKey, initialUpdatedAt, initialValue, localStorageKey, onValueChange, readLocalBuffer, readMediaBoundary, saveNow, timestampMs]);
 
   // Adjust height on text value change
   const adjustHeight = useCallback(() => {
-    const textarea = textareaRef.current;
-    if (!textarea) return;
-    textarea.style.height = "auto";
-    textarea.style.height = `${textarea.scrollHeight}px`;
+    [textareaRef.current, afterTextareaRef.current].forEach((textarea) => {
+      if (!textarea) return;
+      textarea.style.height = "auto";
+      textarea.style.height = `${textarea.scrollHeight}px`;
+    });
   }, []);
 
   useEffect(() => {
@@ -221,13 +252,71 @@ export function NoteArea({
     [saveNow]
   );
 
+  const applyValueChange = (val: string) => {
+    valueRef.current = val;
+    setValue(val);
+    onValueChange?.(val);
+    const bufferUpdatedAt = writeLocalBuffer(localStorageKeyRef.current, val);
+    scheduleSave(val, bufferUpdatedAt);
+  };
+
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const val = e.target.value;
-      valueRef.current = val;
-      setValue(val);
-      onValueChange?.(val);
-      const bufferUpdatedAt = writeLocalBuffer(localStorageKeyRef.current, val);
-      scheduleSave(val, bufferUpdatedAt);
+    applyValueChange(e.target.value);
+  };
+
+  const splitBoundary = attachments.length > 0 ? mediaBoundary ?? value.length : null;
+  const beforeMediaText = splitBoundary === null ? value : value.slice(0, splitBoundary);
+  const afterMediaText = splitBoundary === null ? "" : value.slice(splitBoundary).replace(/^\n+/, "");
+
+  const updateSplitText = (nextBefore: string, nextAfter: string) => {
+    const normalizedAfter = nextAfter.replace(/^\n+/, "");
+    const nextBoundary = nextBefore.length;
+    const nextValue = normalizedAfter ? `${nextBefore}${nextBefore ? "\n\n" : ""}${normalizedAfter}` : nextBefore;
+    setMediaBoundary(nextBoundary);
+    writeMediaBoundary(mediaBoundaryKeyRef.current, nextBoundary);
+    applyValueChange(nextValue);
+  };
+
+  const handlePaste = async (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const files = Array.from(event.clipboardData.files);
+    const image = files.find((file) => file.type.startsWith("image/"));
+    if (!image) return;
+
+    event.preventDefault();
+
+    if (image.size > 2 * 1024 * 1024) {
+      setSaveError("Images must be 2MB or smaller.");
+      window.setTimeout(() => setSaveError(""), 3000);
+      return;
+    }
+
+    setSaveError("");
+    setMediaStatus("Uploading image...");
+    let uploadedFileId = "";
+    try {
+      const uploaded = await uploadFile(image, sessionId, (progress) => setMediaStatus(`Uploading image ${progress}%...`));
+      uploadedFileId = uploaded.fileId;
+      setMediaStatus("Saving image...");
+      const created = await addAttachment(sessionId, checkpointId, "file", {
+        content: image.name || "Pasted image",
+        sourceTitle: image.name || "Pasted image",
+        fileName: image.name || "pasted-image.png",
+        fileId: uploaded.fileId,
+        fileMimeType: image.type,
+        fileSize: image.size,
+        userId: uploaded.userId
+      });
+      handleAttachmentAdded(created);
+      setMediaStatus("Image added.");
+      window.setTimeout(() => setMediaStatus(""), 2000);
+    } catch (err: any) {
+      if (uploadedFileId) {
+        void deleteFile(uploadedFileId).catch(() => {});
+      }
+      setMediaStatus("");
+      setSaveError(err?.message || "Could not add pasted image.");
+      window.setTimeout(() => setSaveError(""), 3000);
+    }
   };
 
   const handleTranscript = async (text: string) => {
@@ -250,11 +339,28 @@ export function NoteArea({
 
     await saveNow(nextValue, bufferUpdatedAt);
     requestAnimationFrame(() => {
-      const textarea = textareaRef.current;
+      const textarea = afterTextareaRef.current || textareaRef.current;
       if (!textarea) return;
       textarea.focus();
-      textarea.selectionStart = nextValue.length;
-      textarea.selectionEnd = nextValue.length;
+      textarea.selectionStart = textarea.value.length;
+      textarea.selectionEnd = textarea.value.length;
+      adjustHeight();
+    });
+  };
+
+  const handleAttachmentAdded = (item: CaptureItem) => {
+    onAttachmentAdded(item);
+    if (mediaBoundary === null) {
+      const boundary = valueRef.current.length;
+      setMediaBoundary(boundary);
+      writeMediaBoundary(mediaBoundaryKeyRef.current, boundary);
+    }
+    requestAnimationFrame(() => {
+      const textarea = afterTextareaRef.current || textareaRef.current;
+      if (!textarea) return;
+      textarea.focus();
+      textarea.selectionStart = textarea.value.length;
+      textarea.selectionEnd = textarea.value.length;
       adjustHeight();
     });
   };
@@ -286,10 +392,58 @@ export function NoteArea({
 
   return (
     <div className="w-full font-body">
+      {attachments.length > 0 ? (
+        <>
+          <textarea
+            ref={textareaRef}
+            value={beforeMediaText}
+            onChange={(event) => updateSplitText(event.target.value, afterMediaText)}
+            onPaste={handlePaste}
+            onFocus={() => {
+              focusedRef.current = true;
+            }}
+            onBlur={() => {
+              focusedRef.current = false;
+              if (!dirtyRef.current) return;
+              if (debouncedSaveRef.current) {
+                clearTimeout(debouncedSaveRef.current);
+                debouncedSaveRef.current = null;
+              }
+              void saveNow(valueRef.current);
+            }}
+            placeholder={placeholder}
+            rows={1}
+            className="w-full bg-transparent border-0 outline-none resize-none text-text-primary text-base placeholder-text-muted focus:ring-0 p-0 font-body leading-relaxed"
+          />
+          <InlineMediaList attachments={attachments} onDelete={onAttachmentDeleted} />
+          <textarea
+            ref={afterTextareaRef}
+            value={afterMediaText}
+            onChange={(event) => updateSplitText(beforeMediaText, event.target.value)}
+            onPaste={handlePaste}
+            onFocus={() => {
+              focusedRef.current = true;
+            }}
+            onBlur={() => {
+              focusedRef.current = false;
+              if (!dirtyRef.current) return;
+              if (debouncedSaveRef.current) {
+                clearTimeout(debouncedSaveRef.current);
+                debouncedSaveRef.current = null;
+              }
+              void saveNow(valueRef.current);
+            }}
+            placeholder="Continue writing..."
+            rows={1}
+            className="mt-3 w-full bg-transparent border-0 outline-none resize-none text-text-primary text-base placeholder-text-muted focus:ring-0 p-0 font-body leading-relaxed"
+          />
+        </>
+      ) : (
       <textarea
         ref={textareaRef}
         value={value}
         onChange={handleChange}
+        onPaste={handlePaste}
         onFocus={() => {
           focusedRef.current = true;
         }}
@@ -306,16 +460,16 @@ export function NoteArea({
         rows={1}
         className="w-full bg-transparent border-0 outline-none resize-none text-text-primary text-base placeholder-text-muted focus:ring-0 p-0 font-body leading-relaxed"
       />
+      )}
       <AttachmentToolbar
         sessionId={sessionId}
         checkpointId={checkpointId}
-        attachments={attachments}
-        onAttachmentAdded={onAttachmentAdded}
-        onAttachmentDeleted={onAttachmentDeleted}
+        onAttachmentAdded={handleAttachmentAdded}
         onTranscript={handleTranscript}
         saveStatusSlot={
           <SaveStatusIndicator
             error={saveError}
+            mediaStatus={mediaStatus}
             status={saveStatus}
             showSaved={showSavedStatus}
           />
@@ -327,14 +481,15 @@ export function NoteArea({
 
 interface SaveStatusIndicatorProps {
   error: string;
+  mediaStatus: string;
   status: "saved" | "saving" | "local";
   showSaved: boolean;
 }
 
-function SaveStatusIndicator({ error, status, showSaved }: SaveStatusIndicatorProps) {
-  const label = error || (status === "saving" ? "Saving..." : status === "local" ? "Saved locally" : "Saved ✓");
-  const isVisible = Boolean(error) || status === "saving" || status === "local" || showSaved;
-  const tone = error ? "text-error" : status === "local" ? "text-accent" : status === "saved" ? "text-success" : "text-text-muted";
+function SaveStatusIndicator({ error, mediaStatus, status, showSaved }: SaveStatusIndicatorProps) {
+  const label = mediaStatus || error || (status === "saving" ? "Saving..." : status === "local" ? "Saved locally" : "Saved ✓");
+  const isVisible = Boolean(mediaStatus) || Boolean(error) || status === "saving" || status === "local" || showSaved;
+  const tone = error ? "text-error" : mediaStatus ? "text-text-muted" : status === "local" ? "text-accent" : status === "saved" ? "text-success" : "text-text-muted";
 
   return (
     <AnimatePresence initial={false}>

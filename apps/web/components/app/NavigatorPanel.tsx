@@ -79,7 +79,7 @@ export function NavigatorPanel({
           <div className="flex flex-col gap-2.5">
             {sources.map((src) => {
               const isUrl = src.type === "url";
-              const isImg = src.type === "image";
+              const isImg = src.type === "image" || src.fileMimeType?.startsWith("image/");
               const isAudio = src.type === "audio";
 
               let srcIcon: "image" | "link" | "mic" | "document" = "document";
@@ -92,7 +92,7 @@ export function NavigatorPanel({
                   key={src.$id}
                   onClick={() => {
                     if (onSourceClick) onSourceClick(src);
-                    else if (isUrl && src.sourceUrl) window.open(src.sourceUrl, "_blank");
+                    else if (isUrl) window.open(src.sourceUrl || src.content, "_blank");
                   }}
                   className="flex items-start gap-2.5 p-2 rounded-lg hover:bg-neutral-soft cursor-pointer transition-all group"
                 >

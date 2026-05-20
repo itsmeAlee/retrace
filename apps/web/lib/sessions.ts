@@ -407,8 +407,18 @@ export async function getCheckpointAttachments(checkpointId: string): Promise<Ca
     ]);
     return res.documents as unknown as CaptureItem[];
   } catch (error) {
-    if (isSchemaMismatchError(error)) return [];
-    throw error;
+    if (!isSchemaMismatchError(error)) throw error;
+    try {
+      const res = await db.listDocuments(dbId, capturesTableId, [
+        Query.equal("checkpointId", checkpointId),
+        Query.orderAsc("createdAt"),
+        Query.limit(100)
+      ]);
+      return (res.documents as unknown as CaptureItem[]).filter((item) => !item.isCheckpoint);
+    } catch (fallbackError) {
+      if (isSchemaMismatchError(fallbackError)) return [];
+      throw fallbackError;
+    }
   }
 }
 
@@ -429,7 +439,7 @@ export async function getAllSessionSources(sessionId: string): Promise<CaptureIt
   }
   
   return (res.documents as unknown as CaptureItem[]).filter(
-    item => !item.isCheckpoint && !item.isSessionNote && item.sourceTitle !== sessionNoteMarker && ["url", "video", "file", "audio"].includes(item.type)
+    item => !item.isCheckpoint && !item.isSessionNote && item.sourceTitle !== sessionNoteMarker && ["url", "video", "file", "pdf", "image", "audio"].includes(item.type)
   );
 }
 
@@ -440,22 +450,21 @@ export async function addAttachment(
   data: Partial<CaptureItem>
 ): Promise<CaptureItem> {
   const db = await createAuthedDatabases();
-  const userId = await getCurrentUserId();
+  const userId = data.userId || await getCurrentUserId();
 
-  const baseAttachment = {
+  const baseAttachment = compactDocumentData({
     sessionId,
     userId,
     type,
     content: data.content || "",
-    sourceUrl: data.sourceUrl || "",
     sourceTitle: data.sourceTitle || "",
     fileName: data.fileName || "",
     fileId: data.fileId || "",
     fileMimeType: data.fileMimeType || "",
-    fileSize: data.fileSize || null,
-    duration: data.duration || null,
+    fileSize: data.fileSize,
+    duration: data.duration,
     createdAt: new Date().toISOString()
-  };
+  });
 
   let created;
   try {
@@ -469,5 +478,29 @@ export async function addAttachment(
     if (!isSchemaMismatchError(error)) throw error;
     created = await db.createDocument(dbId, capturesTableId, ID.unique(), baseAttachment);
   }
-  return created as unknown as CaptureItem;
+
+  const attachment = created as unknown as CaptureItem;
+  return {
+    ...attachment,
+    sessionId,
+    userId,
+    type,
+    content: attachment.content ?? baseAttachment.content,
+    sourceUrl: attachment.sourceUrl ?? data.sourceUrl ?? baseAttachment.content,
+    sourceTitle: attachment.sourceTitle ?? baseAttachment.sourceTitle,
+    fileName: attachment.fileName ?? baseAttachment.fileName,
+    fileId: attachment.fileId ?? baseAttachment.fileId,
+    fileMimeType: attachment.fileMimeType ?? baseAttachment.fileMimeType,
+    fileSize: attachment.fileSize ?? data.fileSize,
+    duration: attachment.duration ?? data.duration,
+    checkpointId: attachment.checkpointId ?? checkpointId ?? "",
+    isCheckpoint: attachment.isCheckpoint ?? false,
+    isSessionNote: attachment.isSessionNote ?? false
+  };
+}
+
+function compactDocumentData<T extends Record<string, unknown>>(data: T) {
+  return Object.fromEntries(
+    Object.entries(data).filter(([, value]) => value !== undefined && value !== null)
+  ) as Partial<T>;
 }
