@@ -34,7 +34,6 @@ export type CaptureItem = {
   markerNote?: string;
   aiSummary?: string;
   isMarker?: boolean;
-  isAutoMarker?: boolean;
   createdAt: string;
   duration?: number;
   
@@ -67,7 +66,6 @@ export type AddCaptureInput = {
   markerNote?: string | null;
   aiSummary?: string | null;
   isMarker?: boolean;
-  isAutoMarker?: boolean;
 };
 
 export type UpdateCaptureInput = Partial<
@@ -350,7 +348,12 @@ export async function getCheckpoints(sessionId: string): Promise<CaptureItem[]> 
   }
 }
 
-export async function createCheckpoint(sessionId: string, name: string): Promise<CaptureItem> {
+export async function createCheckpoint(
+  sessionId: string,
+  name: string,
+  createdAt = new Date().toISOString(),
+  content = ""
+): Promise<CaptureItem> {
   const db = await createAuthedDatabases();
   const userId = await getCurrentUserId();
 
@@ -358,10 +361,10 @@ export async function createCheckpoint(sessionId: string, name: string): Promise
     sessionId,
     userId,
     type: "text",
-    content: "",
+    content,
     isCheckpoint: true,
     checkpointName: name,
-    createdAt: new Date().toISOString()
+    createdAt
   });
   return created as unknown as CaptureItem;
 }

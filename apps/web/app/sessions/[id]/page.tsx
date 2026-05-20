@@ -2,7 +2,7 @@
 
 import { AnimatePresence, motion } from "framer-motion";
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AppShell } from "../../../components/app/AppShell";
 import { DocumentWorkspace } from "../../../components/app/DocumentWorkspace";
 import { NavigatorPanel } from "../../../components/app/NavigatorPanel";
@@ -30,13 +30,14 @@ export default function SessionDetailPage() {
   const [checkpoints, setCheckpoints] = useState<CaptureItem[]>([]);
   const [sources, setSources] = useState<CaptureItem[]>([]);
   const [attachmentsMap, setAttachmentsMap] = useState<Record<string, CaptureItem[]>>({});
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [expandedIds, setExpandedIds] = useState<string[]>([]);
+  const [activeCheckpointId, setActiveCheckpointId] = useState<string | null>(null);
   
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState("");
   const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
 
-  const loadAllData = async (silent = false) => {
+  const loadAllData = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try {
       const [loadedSession, loadedNote, loadedCheckpoints, loadedSources] = await Promise.all([
@@ -79,11 +80,11 @@ export default function SessionDetailPage() {
     } finally {
       if (!silent) setLoading(false);
     }
-  };
+  }, [router, sessionId]);
 
   useEffect(() => {
     loadAllData();
-  }, [sessionId]);
+  }, [loadAllData]);
 
   useEffect(() => {
     if (!toast) return;
@@ -96,11 +97,15 @@ export default function SessionDetailPage() {
   };
 
   const handleToggleCheckpoint = (checkpointId: string) => {
-    setExpandedId(prev => (prev === checkpointId ? null : checkpointId));
+    setActiveCheckpointId(checkpointId);
+    setExpandedIds((prev) =>
+      prev.includes(checkpointId) ? prev.filter((id) => id !== checkpointId) : [...prev, checkpointId]
+    );
   };
 
   const handleCheckpointClick = (checkpointId: string) => {
-    setExpandedId(checkpointId);
+    setActiveCheckpointId(checkpointId);
+    setExpandedIds((prev) => (prev.includes(checkpointId) ? prev : [...prev, checkpointId]));
     setTimeout(() => {
       const element = checkpointRefs.current[checkpointId];
       if (element) {
@@ -110,8 +115,15 @@ export default function SessionDetailPage() {
   };
 
   const handleCheckpointCreated = (checkpointId: string) => {
+    setActiveCheckpointId(checkpointId);
+    setExpandedIds((prev) => prev.filter((id) => id !== checkpointId));
     loadAllData(true).then(() => {
-      handleCheckpointClick(checkpointId);
+      setTimeout(() => {
+        const element = checkpointRefs.current[checkpointId];
+        if (element) {
+          element.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+      }, 150);
     });
   };
 
@@ -177,32 +189,34 @@ export default function SessionDetailPage() {
           <div className="flex-1 flex flex-col md:flex-row relative">
             
             {/* Main workspace (Column 2) */}
-            <div className="flex-1 px-6 py-8 md:px-12 max-w-3xl min-h-screen">
-              {/* Back Button */}
-              <button
-                onClick={() => router.push("/sessions")}
-                className="mb-6 flex items-center gap-2 text-xs font-semibold text-text-muted hover:text-primary uppercase tracking-wider transition-colors"
-                type="button"
-              >
-                <Icon className="h-4 w-4" name="arrow-left" />
-                Back to Sessions
-              </button>
+            <div className="min-h-screen flex-1 px-6 py-8 md:px-10">
+              <div className="mx-auto w-full max-w-4xl">
+                {/* Back Button */}
+                <button
+                  onClick={() => router.push("/sessions")}
+                  className="mb-6 flex items-center gap-2 text-xs font-semibold text-text-muted hover:text-primary uppercase tracking-wider transition-colors"
+                  type="button"
+                >
+                  <Icon className="h-4 w-4" name="arrow-left" />
+                  Back to Sessions
+                </button>
 
-              {session && (
-                <DocumentWorkspace
-                  session={session}
-                  sessionNote={sessionNote}
-                  checkpoints={checkpoints}
-                  attachmentsMap={attachmentsMap}
-                  expandedId={expandedId}
-                  onToggleCheckpoint={handleToggleCheckpoint}
-                  onRefresh={refreshData}
-                  onAttachmentAdded={handleAttachmentAdded}
-                  onAttachmentDeleted={handleAttachmentDeleted}
-                  onCheckpointCreated={handleCheckpointCreated}
-                  checkpointRefs={checkpointRefs}
-                />
-              )}
+                {session && (
+                  <DocumentWorkspace
+                    session={session}
+                    sessionNote={sessionNote}
+                    checkpoints={checkpoints}
+                    attachmentsMap={attachmentsMap}
+                    expandedIds={expandedIds}
+                    onToggleCheckpoint={handleToggleCheckpoint}
+                    onRefresh={refreshData}
+                    onAttachmentAdded={handleAttachmentAdded}
+                    onAttachmentDeleted={handleAttachmentDeleted}
+                    onCheckpointCreated={handleCheckpointCreated}
+                    checkpointRefs={checkpointRefs}
+                  />
+                )}
+              </div>
             </div>
 
             {/* Desktop Right Panel (Column 3) */}
@@ -210,7 +224,7 @@ export default function SessionDetailPage() {
               <NavigatorPanel
                 checkpoints={checkpoints}
                 sources={sources}
-                activeId={expandedId}
+                activeId={activeCheckpointId}
                 onCheckpointClick={handleCheckpointClick}
               />
             </div>
@@ -262,7 +276,7 @@ export default function SessionDetailPage() {
                     <NavigatorPanel
                       checkpoints={checkpoints}
                       sources={sources}
-                      activeId={expandedId}
+                      activeId={activeCheckpointId}
                       onCheckpointClick={(id) => {
                         handleCheckpointClick(id);
                         setIsMobileDrawerOpen(false);

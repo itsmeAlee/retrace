@@ -45,7 +45,6 @@ export default async (context) =>
         fileSize: Number.isFinite(Number(body.fileSize)) ? Number(body.fileSize) : undefined,
         fileMimeType: normalizeText(body.fileMimeType, 100),
         isMarker: Boolean(body.isMarker),
-        isAutoMarker: Boolean(body.isAutoMarker),
         createdAt: now,
       },
       permissions: rowPermissions(user.$id),

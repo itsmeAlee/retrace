@@ -1,6 +1,7 @@
 type IconName =
   | "add"
   | "arrow-left"
+  | "chevron-down"
   | "check"
   | "delete"
   | "document"
@@ -15,7 +16,6 @@ type IconName =
   | "move"
   | "mic"
   | "note"
-  | "pause"
   | "pencil"
   | "pin"
   | "play"
@@ -35,6 +35,7 @@ type IconName =
 const paths: Record<IconName, string[]> = {
   add: ["M12 5v14", "M5 12h14"],
   "arrow-left": ["M19 12H5", "M12 19l-7-7 7-7"],
+  "chevron-down": ["M6 9l6 6 6-6"],
   check: ["M20 6 9 17l-5-5"],
   delete: ["M3 6h18", "M8 6V4h8v2", "M19 6l-1 14H6L5 6", "M10 11v6", "M14 11v6"],
   document: ["M7 3h7l5 5v13H7z", "M14 3v6h5", "M10 13h6", "M10 17h4"],
@@ -49,7 +50,6 @@ const paths: Record<IconName, string[]> = {
   move: ["M4 7h11v10H4z", "M15 10h5v10H9v-3", "M13 10l2 2 2-2"],
   mic: ["M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3z", "M19 10v2a7 7 0 0 1-14 0v-2", "M12 19v3"],
   note: ["M5 4h14v16H5z", "M8 8h8", "M8 12h5", "M15 16h1"],
-  pause: ["M8 5v14", "M16 5v14"],
   pencil: ["M4 20h4l11-11-4-4L4 16v4z", "M13 7l4 4"],
   pin: ["M12 3l6 6-3 3 3 3-3 3-3-3-5 5 5-5-3-3 3-3z"],
   play: ["M8 5v14l11-7z"],

@@ -32,7 +32,7 @@ export function NavigatorPanel({
           <p className="text-xs text-text-muted italic pl-1">No checkpoints created yet.</p>
         ) : (
           <div className="relative pl-3 border-l-[1.5px] border-border ml-1.5 flex flex-col gap-4 py-1">
-            {checkpoints.map((cp) => {
+            {checkpoints.map((cp, index) => {
               const isActive = activeId === cp.$id;
               return (
                 <div
@@ -57,7 +57,7 @@ export function NavigatorPanel({
                         : "text-text-muted group-hover:text-text-primary"
                     }`}
                   >
-                    {cp.checkpointName || "Untitled Checkpoint"}
+                    {index + 1}. {cp.checkpointName || "Untitled Checkpoint"}
                   </span>
                 </div>
               );

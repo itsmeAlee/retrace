@@ -49,10 +49,8 @@ export function MarkerRow({ marker, onEdit, onDelete }: MarkerRowProps) {
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2">
-              <Icon className="h-3.5 w-3.5 text-primary" name={marker.isAutoMarker ? "pause" : "pin"} />
-              <span className="text-xs font-semibold uppercase tracking-[0.08em] text-text-muted">
-                {marker.isAutoMarker ? "Session paused" : "Marker"}
-              </span>
+              <Icon className="h-3.5 w-3.5 text-primary" name="pin" />
+              <span className="text-xs font-semibold uppercase tracking-[0.08em] text-text-muted">Marker</span>
             </div>
             <span className="shrink-0 text-xs text-text-muted">{timeAgo(marker.createdAt)}</span>
           </div>
@@ -66,7 +64,7 @@ export function MarkerRow({ marker, onEdit, onDelete }: MarkerRowProps) {
               onKeyDown={handleKey}
               value={note}
             />
-          ) : marker.isAutoMarker && !note ? null : (
+          ) : (
             <p className={`mt-2 text-sm ${note ? "italic text-primary" : "text-text-muted"}`}>{note || "No note added."}</p>
           )}
 

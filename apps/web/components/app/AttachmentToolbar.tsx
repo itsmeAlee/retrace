@@ -13,8 +13,8 @@ interface AttachmentToolbarProps {
   onAttachmentAdded: (item: CaptureItem) => void;
   onAttachmentDeleted?: (id: string) => void;
   attachments?: CaptureItem[];
-  actionSlot?: React.ReactNode;
   onTranscript?: (text: string) => Promise<void> | void;
+  saveStatusSlot?: React.ReactNode;
 }
 
 export function AttachmentToolbar({
@@ -23,8 +23,8 @@ export function AttachmentToolbar({
   onAttachmentAdded,
   onAttachmentDeleted,
   attachments = [],
-  actionSlot,
-  onTranscript
+  onTranscript,
+  saveStatusSlot
 }: AttachmentToolbarProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isUrlInputOpen, setIsUrlInputOpen] = useState(false);
@@ -212,7 +212,7 @@ export function AttachmentToolbar({
 
   return (
     <div className="mt-4 border-t border-border pt-3 font-body">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         {/* Actions Button Group */}
         <div className="flex flex-wrap items-center gap-2">
           {/* File Upload Trigger */}
@@ -264,11 +264,10 @@ export function AttachmentToolbar({
             </button>
           )}
 
-          {actionSlot}
         </div>
 
         {/* Dynamic Voice Recording / Progress State */}
-        <div className="flex-1 flex justify-end">
+        <div className="ml-auto flex items-center gap-3">
           <AnimatePresence mode="wait">
             {recorderState === "recording" && (
               <motion.div
@@ -321,6 +320,7 @@ export function AttachmentToolbar({
               </motion.div>
             )}
           </AnimatePresence>
+          {saveStatusSlot}
         </div>
       </div>
 

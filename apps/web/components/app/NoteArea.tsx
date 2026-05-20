@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import { AttachmentToolbar } from "./AttachmentToolbar";
 import { type CaptureItem } from "../../lib/sessions";
 
@@ -10,11 +11,11 @@ interface NoteAreaProps {
   initialValue: string;
   initialUpdatedAt?: string;
   onSave: (val: string) => Promise<void>;
+  onValueChange?: (val: string) => void;
   placeholder?: string;
   attachments?: CaptureItem[];
   onAttachmentAdded: (item: CaptureItem) => void;
   onAttachmentDeleted?: (id: string) => void;
-  toolbarAction?: React.ReactNode;
 }
 
 export function NoteArea({
@@ -23,11 +24,11 @@ export function NoteArea({
   initialValue,
   initialUpdatedAt,
   onSave,
+  onValueChange,
   placeholder = "Start writing here...",
   attachments = [],
   onAttachmentAdded,
-  onAttachmentDeleted,
-  toolbarAction
+  onAttachmentDeleted
 }: NoteAreaProps) {
   type SaveStatus = "saved" | "saving" | "local";
   type LocalNoteBuffer = {
@@ -39,6 +40,7 @@ export function NoteArea({
   const [value, setValue] = useState(initialValue);
   const [saveError, setSaveError] = useState("");
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
+  const [showSavedStatus, setShowSavedStatus] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const debouncedSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const documentKey = checkpointId ?? `session:${sessionId}`;
@@ -145,6 +147,7 @@ export function NoteArea({
       lastSavedValueRef.current = initialValue;
       dirtyRef.current = hasNewerLocal;
       setValue(nextValue);
+      onValueChange?.(nextValue);
       setSaveError("");
       setSaveStatus(hasNewerLocal ? "local" : "saved");
       if (hasNewerLocal && localBuffer) {
@@ -159,6 +162,7 @@ export function NoteArea({
       valueRef.current = localBuffer.content;
       dirtyRef.current = true;
       setValue(localBuffer.content);
+      onValueChange?.(localBuffer.content);
       setSaveStatus("local");
       void saveNow(localBuffer.content, localBuffer.updatedAt);
       return;
@@ -168,12 +172,13 @@ export function NoteArea({
       valueRef.current = initialValue;
       lastSavedValueRef.current = initialValue;
       setValue(initialValue);
+      onValueChange?.(initialValue);
       setSaveStatus("saved");
       if (localBuffer && !hasNewerLocal) {
         clearLocalBuffer(localStorageKey);
       }
     }
-  }, [clearLocalBuffer, documentKey, initialUpdatedAt, initialValue, localStorageKey, readLocalBuffer, saveNow, timestampMs]);
+  }, [clearLocalBuffer, documentKey, initialUpdatedAt, initialValue, localStorageKey, onValueChange, readLocalBuffer, saveNow, timestampMs]);
 
   // Adjust height on text value change
   const adjustHeight = useCallback(() => {
@@ -186,6 +191,17 @@ export function NoteArea({
   useEffect(() => {
     adjustHeight();
   }, [adjustHeight, value]);
+
+  useEffect(() => {
+    if (saveStatus !== "saved") {
+      setShowSavedStatus(false);
+      return;
+    }
+
+    setShowSavedStatus(true);
+    const timeout = window.setTimeout(() => setShowSavedStatus(false), 2000);
+    return () => window.clearTimeout(timeout);
+  }, [saveStatus]);
 
   const scheduleSave = useCallback(
     (nextValue: string, bufferUpdatedAt: string) => {
@@ -207,10 +223,11 @@ export function NoteArea({
 
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value;
-    valueRef.current = val;
-    setValue(val);
-    const bufferUpdatedAt = writeLocalBuffer(localStorageKeyRef.current, val);
-    scheduleSave(val, bufferUpdatedAt);
+      valueRef.current = val;
+      setValue(val);
+      onValueChange?.(val);
+      const bufferUpdatedAt = writeLocalBuffer(localStorageKeyRef.current, val);
+      scheduleSave(val, bufferUpdatedAt);
   };
 
   const handleTranscript = async (text: string) => {
@@ -224,6 +241,7 @@ export function NoteArea({
     dirtyRef.current = true;
     setSaveStatus("saving");
     setValue(nextValue);
+    onValueChange?.(nextValue);
 
     if (debouncedSaveRef.current) {
       clearTimeout(debouncedSaveRef.current);
@@ -288,20 +306,48 @@ export function NoteArea({
         rows={1}
         className="w-full bg-transparent border-0 outline-none resize-none text-text-primary text-base placeholder-text-muted focus:ring-0 p-0 font-body leading-relaxed"
       />
-      <div className="mt-2 min-h-4">
-        <p className={`text-xs ${saveError ? "text-error" : saveStatus === "local" ? "text-accent" : "text-text-muted"}`}>
-          {saveError || (saveStatus === "saving" ? "Saving..." : saveStatus === "local" ? "Saved locally" : "Saved")}
-        </p>
-      </div>
       <AttachmentToolbar
         sessionId={sessionId}
         checkpointId={checkpointId}
         attachments={attachments}
-        actionSlot={toolbarAction}
         onAttachmentAdded={onAttachmentAdded}
         onAttachmentDeleted={onAttachmentDeleted}
         onTranscript={handleTranscript}
+        saveStatusSlot={
+          <SaveStatusIndicator
+            error={saveError}
+            status={saveStatus}
+            showSaved={showSavedStatus}
+          />
+        }
       />
     </div>
+  );
+}
+
+interface SaveStatusIndicatorProps {
+  error: string;
+  status: "saved" | "saving" | "local";
+  showSaved: boolean;
+}
+
+function SaveStatusIndicator({ error, status, showSaved }: SaveStatusIndicatorProps) {
+  const label = error || (status === "saving" ? "Saving..." : status === "local" ? "Saved locally" : "Saved ✓");
+  const isVisible = Boolean(error) || status === "saving" || status === "local" || showSaved;
+  const tone = error ? "text-error" : status === "local" ? "text-accent" : status === "saved" ? "text-success" : "text-text-muted";
+
+  return (
+    <AnimatePresence initial={false}>
+      {isVisible && (
+        <motion.span
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className={`whitespace-nowrap text-xs ${tone}`}
+        >
+          {label}
+        </motion.span>
+      )}
+    </AnimatePresence>
   );
 }
