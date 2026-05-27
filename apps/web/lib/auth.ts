@@ -1,8 +1,12 @@
 "use client";
 
 import type { Models } from "appwrite";
-import { ExecutionMethod, OAuthProvider } from "appwrite";
-import { account, functions } from "./appwrite";
+import { OAuthProvider } from "appwrite";
+import { account } from "./appwrite";
+import { uiDurations } from "./app-constants";
+import { clearClientAuthCache, getCurrentUser } from "./auth-client";
+import type { PublicAuthFunctionKey } from "./auth-functions";
+import { logError } from "./debug";
 
 type ErrorCode =
   | "EMAIL_EXISTS"
@@ -51,21 +55,6 @@ export class AuthUiError extends Error {
   }
 }
 
-const endpoint = process.env.NEXT_PUBLIC_APPWRITE_ENDPOINT ?? "";
-
-const functionEndpoints = {
-  signupInit: process.env.NEXT_PUBLIC_APPWRITE_FUNCTION_SIGNUP_INIT ?? `${endpoint}/functions/auth-signup-init/executions`,
-  signupVerify: process.env.NEXT_PUBLIC_APPWRITE_FUNCTION_SIGNUP_VERIFY ?? `${endpoint}/functions/auth-signup-verify/executions`,
-  resendOtp: process.env.NEXT_PUBLIC_APPWRITE_FUNCTION_RESEND_OTP ?? `${endpoint}/functions/auth-resend-otp/executions`,
-  forgotInit: process.env.NEXT_PUBLIC_APPWRITE_FUNCTION_FORGOT_INIT ?? `${endpoint}/functions/auth-forgot-password-init/executions`,
-  forgotReset: process.env.NEXT_PUBLIC_APPWRITE_FUNCTION_FORGOT_RESET ?? `${endpoint}/functions/auth-password-reset/executions`
-};
-
-function functionIdFromEndpoint(functionEndpoint: string) {
-  const match = functionEndpoint.match(/\/functions\/([^/]+)\/executions\/?$/);
-  return match ? decodeURIComponent(match[1]) : functionEndpoint;
-}
-
 function mapAuthMessage(code?: string, data: Partial<MessageData> = {}) {
   switch (code) {
     case "EMAIL_EXISTS":
@@ -93,26 +82,28 @@ function mapAuthMessage(code?: string, data: Partial<MessageData> = {}) {
   }
 }
 
-async function executeAuthFunction<T>(functionEndpoint: string, body: Record<string, unknown>): Promise<AuthResult<T>> {
+async function executeAuthFunction<T>(functionKey: PublicAuthFunctionKey, body: Record<string, unknown>): Promise<AuthResult<T>> {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), uiDurations.authFunctionTimeoutMs);
+
   try {
-    const execution = await functions.createExecution({
-      functionId: functionIdFromEndpoint(functionEndpoint),
-      body: JSON.stringify(body),
-      async: false,
-      xpath: "/",
-      method: ExecutionMethod.POST,
-      headers: { "content-type": "application/json" }
+    const response = await fetch("/api/appwrite/auth-functions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ functionKey, body }),
+      signal: controller.signal
     });
 
-    if (execution.status !== "completed" || !execution.responseBody) {
+    const parsed = (await response.json().catch(() => null)) as AuthResult<T> | null;
+    if (!response.ok || !parsed) {
+      const failure = parsed?.success === false ? parsed : undefined;
       return {
         success: false,
-        error: "AUTH_FUNCTION_FAILED",
-        message: mapAuthMessage("AUTH_FUNCTION_FAILED")
+        error: failure?.error ?? "AUTH_FUNCTION_FAILED",
+        message: mapAuthMessage(failure?.error ?? "AUTH_FUNCTION_FAILED", failure)
       };
     }
 
-    const parsed = JSON.parse(execution.responseBody) as AuthResult<T>;
     if (!parsed.success) {
       return {
         ...parsed,
@@ -121,12 +112,15 @@ async function executeAuthFunction<T>(functionEndpoint: string, body: Record<str
     }
 
     return parsed;
-  } catch {
+  } catch (error) {
+    logError("auth function proxy request failed", error, { functionKey });
     return {
       success: false,
       error: "AUTH_FUNCTION_FAILED",
       message: mapAuthMessage("AUTH_FUNCTION_FAILED")
     };
+  } finally {
+    window.clearTimeout(timeout);
   }
 }
 
@@ -147,15 +141,16 @@ async function adoptReturnedSession(session: unknown) {
     body: JSON.stringify({ secret: maybeSession.secret, expire: maybeSession.expire })
   });
 
+  if (response.ok) clearClientAuthCache();
   return response.ok;
 }
 
 export function signupInit(name: string, email: string, password: string) {
-  return executeAuthFunction(functionEndpoints.signupInit, { name, email, password });
+  return executeAuthFunction("signupInit", { name, email, password });
 }
 
 export async function verifySignupOtp(email: string, otp: string) {
-  const result = await executeAuthFunction<{ session?: unknown; requiresLogin?: boolean; message?: string }>(functionEndpoints.signupVerify, { email, otp });
+  const result = await executeAuthFunction<{ session?: unknown; requiresLogin?: boolean; message?: string }>("signupVerify", { email, otp });
   if (result.success && result.session) {
     const adopted = await adoptReturnedSession(result.session).catch(() => false);
     if (!adopted) {
@@ -171,18 +166,19 @@ export async function verifySignupOtp(email: string, otp: string) {
 }
 
 export function resendOtp(email: string) {
-  return executeAuthFunction(functionEndpoints.resendOtp, { email });
+  return executeAuthFunction("resendOtp", { email });
 }
 
 export function forgotPasswordInit(email: string) {
-  return executeAuthFunction(functionEndpoints.forgotInit, { email });
+  return executeAuthFunction("forgotInit", { email });
 }
 
 export function verifyAndResetPassword(email: string, otp: string, newPassword: string) {
-  return executeAuthFunction(functionEndpoints.forgotReset, { email, otp, newPassword });
+  return executeAuthFunction("forgotReset", { email, otp, newPassword });
 }
 
 export async function login(email: string, password: string) {
+  clearClientAuthCache();
   const response = await fetch("/api/auth/login", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -194,6 +190,7 @@ export async function login(email: string, password: string) {
     throw new AuthUiError(data?.message ?? "Could not sign in. Please try again.", response.status);
   }
 
+  clearClientAuthCache();
   return data?.user ?? null;
 }
 
@@ -212,15 +209,10 @@ export function loginWithGoogle() {
 }
 
 export async function logout() {
+  clearClientAuthCache();
   await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
 }
 
 export async function getUser() {
-  const response = await fetch("/api/auth/me", { method: "GET" }).catch(() => null);
-  if (!response?.ok) {
-    return null;
-  }
-
-  const data = (await response.json().catch(() => null)) as { user?: Models.User<Models.Preferences> } | null;
-  return data?.user ?? null;
+  return getCurrentUser();
 }

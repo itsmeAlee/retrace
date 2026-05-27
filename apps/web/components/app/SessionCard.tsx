@@ -1,6 +1,5 @@
 "use client";
 
-import { motion, useReducedMotion } from "framer-motion";
 import { Icon } from "../Icon";
 
 export type SessionCardProps = {
@@ -21,14 +20,10 @@ const statusStyles: Record<SessionCardProps["status"], string> = {
 };
 
 export function SessionCard({ description, icon = "document", items, onClick, status, time, title }: SessionCardProps) {
-  const reduce = useReducedMotion();
-
   return (
-    <motion.article
-      className="flex min-h-session-card cursor-pointer flex-col rounded-card border border-border bg-surface p-5 shadow-card transition-colors hover:border-border-hover hover:shadow-card-hover"
+    <article
+      className="flex min-h-session-card w-full min-w-0 cursor-pointer flex-col rounded-card border border-border bg-surface p-5 shadow-card transition-all hover:-translate-y-0.5 hover:border-border-hover hover:shadow-card-hover motion-reduce:hover:translate-y-0"
       onClick={onClick}
-      transition={{ duration: 0.2, ease: "easeOut" }}
-      whileHover={reduce ? undefined : { y: -2 }}
     >
       <div className="flex items-start justify-between gap-3">
         <h3 className="font-heading text-xl font-bold text-text-primary">{title}</h3>
@@ -47,6 +42,6 @@ export function SessionCard({ description, icon = "document", items, onClick, st
         </span>
         <span>{time}</span>
       </div>
-    </motion.article>
+    </article>
   );
 }

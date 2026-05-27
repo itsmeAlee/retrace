@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { SESSION_COOKIE_NAME, sessionCookieOptions } from "../../../../lib/auth-session";
 import { createSessionAccount, ensureEmailVerified } from "../../../../lib/server/appwrite";
+import { readSessionSecret } from "../../../../lib/server/session-cookie";
 
 export const runtime = "nodejs";
 
@@ -11,19 +12,14 @@ function unauthorized() {
 }
 
 export async function GET(request: Request) {
-  const session = request.headers
-    .get("cookie")
-    ?.split(";")
-    .map((part) => part.trim())
-    .find((part) => part.startsWith(`${SESSION_COOKIE_NAME}=`))
-    ?.slice(SESSION_COOKIE_NAME.length + 1);
+  const session = readSessionSecret(request);
 
   if (!session) {
     return unauthorized();
   }
 
   try {
-    const user = await createSessionAccount(decodeURIComponent(session)).get();
+    const user = await createSessionAccount(session).get();
     const verifiedUser = await ensureEmailVerified(user).catch(() => user);
     return NextResponse.json({ success: true, user: verifiedUser });
   } catch {

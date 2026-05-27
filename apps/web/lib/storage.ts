@@ -1,10 +1,10 @@
 "use client";
 
-import { Client, ID, Permission, Role, Storage, type Models } from "appwrite";
+import { Client, ID, Permission, Role, Storage } from "appwrite";
+import { appwritePublicConfig } from "./app-config";
+import { getCurrentUserId, getSessionJwt } from "./auth-client";
 
-const endpoint = process.env.NEXT_PUBLIC_APPWRITE_ENDPOINT ?? "";
-const projectId = process.env.NEXT_PUBLIC_APPWRITE_PROJECT_ID ?? "";
-const bucketId = process.env.NEXT_PUBLIC_APPWRITE_BUCKET_ID ?? "";
+const { bucketId, endpoint, projectId } = appwritePublicConfig;
 
 export type UploadedSessionFile = {
   fileId: string;
@@ -16,30 +16,8 @@ export type UploadedSessionFile = {
 };
 
 async function createAuthedStorage() {
-  const response = await fetch("/api/auth/jwt", { method: "POST" });
-  if (!response.ok) {
-    throw new Error("Please sign in again.");
-  }
-
-  const data = (await response.json()) as { jwt?: string };
-  if (!data.jwt || !endpoint || !projectId || !bucketId) {
-    throw new Error("Storage is not configured.");
-  }
-
-  const client = new Client().setEndpoint(endpoint).setProject(projectId).setJWT(data.jwt);
+  const client = new Client().setEndpoint(endpoint).setProject(projectId).setJWT(await getSessionJwt());
   return new Storage(client);
-}
-
-async function getCurrentUserId() {
-  const response = await fetch("/api/auth/me", { method: "GET" });
-  if (!response.ok) {
-    throw new Error("Please sign in again.");
-  }
-  const data = (await response.json()) as { user?: Models.User<Models.Preferences> };
-  if (!data.user?.$id) {
-    throw new Error("Please sign in again.");
-  }
-  return data.user.$id;
 }
 
 export async function uploadFile(file: File, sessionId: string, onProgress?: (progress: number) => void): Promise<UploadedSessionFile> {

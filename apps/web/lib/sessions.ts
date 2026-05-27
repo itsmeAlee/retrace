@@ -1,7 +1,10 @@
 "use client";
 
 import { ExecutionMethod, Databases, Query, ID, Client } from "appwrite";
-import { functions } from "./appwrite";
+import type { CheckpointAIData, DiagramOutput, SourceReference } from "../types/checkpoint";
+import { appwritePublicConfig } from "./app-config";
+import { getCurrentUserId as getCachedCurrentUserId, getSessionJwt } from "./auth-client";
+import { logError } from "./debug";
 
 export type SessionStatus = "active" | "paused" | "completed" | "archived";
 export type CaptureType = "text" | "url" | "video" | "pdf" | "image" | "file" | "audio";
@@ -32,7 +35,6 @@ export type CaptureItem = {
   fileSize?: number;
   fileMimeType?: string;
   markerNote?: string;
-  aiSummary?: string;
   isMarker?: boolean;
   createdAt: string;
   duration?: number;
@@ -43,14 +45,39 @@ export type CaptureItem = {
   checkpointId?: string;
   noteContent?: string;
   isSessionNote?: boolean;
+  aiTitle?: string;
+  aiStatus?: "pending" | "processing" | "complete" | "failed";
+  aiContext?: string;
+  aiKeyPoints?: string[] | string;
+  aiSourcesUsed?: SourceReference[] | string;
+  aiDiagrams?: DiagramOutput[] | string;
+  aiProcessedAt?: string | null;
+  aiError?: string;
 };
 
 export type CaptureDetails = {
   fullContent?: string;
   markerNote?: string;
-  aiSummary?: string | null;
   updatedAt?: string;
+  
+  // AI fields
+  aiTitle?: string;
+  aiStatus?: "pending" | "complete" | "processing" | "failed";
+  aiContext?: string;
+  aiKeyPoints?: string[];
+  aiSourcesUsed?: SourceReference[];
+  aiKeyFindings?: string[];
+  aiTensions?: string[];
+  aiGaps?: string[];
+  aiSuggestedNext?: string;
+  aiDiagrams?: DiagramOutput[];
+  aiCaptureCount?: number;
+  aiProcessedAt?: string;
+  aiErrors?: string[];
+  aiError?: string;
 };
+
+export type CheckpointWithAI = Omit<CaptureItem, keyof CheckpointAIData> & CheckpointAIData;
 
 export type AddCaptureInput = {
   sessionId: string;
@@ -64,12 +91,11 @@ export type AddCaptureInput = {
   fileSize?: number;
   fileMimeType?: string;
   markerNote?: string | null;
-  aiSummary?: string | null;
   isMarker?: boolean;
 };
 
 export type UpdateCaptureInput = Partial<
-  Pick<CaptureItem, "content" | "sourceUrl" | "sourceTitle" | "note" | "markerNote" | "aiSummary" | "checkpointName">
+  Pick<CaptureItem, "content" | "sourceUrl" | "sourceTitle" | "note" | "markerNote" | "checkpointName">
 >;
 
 type FunctionResult<T> =
@@ -82,19 +108,24 @@ type FunctionResult<T> =
 
 export class SessionsUiError extends Error {
   code?: string;
+  cause?: unknown;
 
-  constructor(message: string, code?: string) {
+  constructor(message: string, code?: string, cause?: unknown) {
     super(message);
     this.name = "SessionsUiError";
     this.code = code;
+    this.cause = cause;
   }
 }
 
-const endpoint = process.env.NEXT_PUBLIC_APPWRITE_ENDPOINT ?? "";
-const projectId = process.env.NEXT_PUBLIC_APPWRITE_PROJECT_ID ?? "";
-const dbId = "retrace_auth";
-const capturesTableId = "capture_items";
+const endpoint = appwritePublicConfig.endpoint;
+const projectId = appwritePublicConfig.projectId;
+const dbId = appwritePublicConfig.databaseId;
+const capturesTableId = appwritePublicConfig.captureItemsTableId;
 const sessionNoteMarker = "__retrace_session_note";
+const checkpointPollIntervalMs = 4000;
+const checkpointPollTimeoutMs = 90000;
+const checkpointPollRequestTimeoutMs = 6000;
 
 const functionEndpoints = {
   create: process.env.NEXT_PUBLIC_APPWRITE_FUNCTION_SESSIONS_CREATE ?? `${endpoint}/functions/sessions-create/executions`,
@@ -116,9 +147,23 @@ function functionIdFromEndpoint(functionEndpoint: string) {
 function mapMessage(code?: string, message?: string) {
   switch (code) {
     case "UNAUTHORIZED":
+    case "401":
       return "Please sign in again.";
     case "FORBIDDEN":
+    case "403":
       return "You do not have access to this session.";
+    case "NOT_FOUND":
+    case "404":
+    case "document_not_found":
+      return "This session could not be found.";
+    case "CONFLICT":
+    case "409":
+    case "document_already_exists":
+      return message ?? "This changed somewhere else. Refresh and try again.";
+    case "500":
+    case "FUNCTION_EXECUTION_FAILED":
+    case "general_server_error":
+      return message ?? "The sessions service is unavailable. Please try again.";
     case "VALIDATION_ERROR":
       return message ?? "Please check the form and try again.";
     case "METHOD_NOT_ALLOWED":
@@ -128,49 +173,71 @@ function mapMessage(code?: string, message?: string) {
   }
 }
 
+function appwriteErrorDetails(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return {};
+  }
+
+  const value = error as { code?: unknown; type?: unknown; message?: unknown; response?: unknown };
+  return {
+    code: typeof value.code === "string" || typeof value.code === "number" ? String(value.code) : undefined,
+    type: typeof value.type === "string" ? value.type : undefined,
+    message: typeof value.message === "string" ? value.message : undefined,
+    response: value.response
+  };
+}
+
+function normalizeSessionsError(error: unknown, fallbackMessage = "Something went wrong. Please try again.") {
+  if (error instanceof SessionsUiError) {
+    if (error.message === "Failed to fetch") {
+      return new SessionsUiError("Could not connect to the sessions service. Please try again.", "NETWORK_ERROR", error);
+    }
+    return error;
+  }
+
+  const details = appwriteErrorDetails(error);
+  if (details.message === "Failed to fetch" || error instanceof TypeError) {
+    return new SessionsUiError("Could not connect to the sessions service. Please try again.", "NETWORK_ERROR", error);
+  }
+
+  if (details.code || details.type || details.message) {
+    return new SessionsUiError(mapMessage(details.type ?? details.code, details.message ?? fallbackMessage), details.type ?? details.code, error);
+  }
+
+  return new SessionsUiError(fallbackMessage, undefined, error);
+}
+
 async function executeFunction<T>(
   functionEndpoint: string,
   method: ExecutionMethod,
   options: { body?: Record<string, unknown>; query?: Record<string, string | number | undefined> } = {}
 ) {
-  const jwtResponse = await fetch("/api/auth/jwt", { method: "POST" }).catch(() => null);
-
-  if (!jwtResponse?.ok) {
-    throw new SessionsUiError("Please sign in again.", "UNAUTHORIZED");
+  let response: Response;
+  try {
+    response = await fetch("/api/appwrite/functions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        functionId: functionIdFromEndpoint(functionEndpoint),
+        method,
+        body: options.body,
+        query: options.query
+      })
+    });
+  } catch (error) {
+    throw normalizeSessionsError(error, "Could not connect to the sessions service. Please try again.");
   }
 
-  const jwtData = (await jwtResponse.json().catch(() => null)) as { jwt?: string } | null;
-  const jwt = jwtData?.jwt;
-  if (!jwt) {
-    throw new SessionsUiError("Please sign in again.", "UNAUTHORIZED");
+  const parsed = (await response.json().catch(() => null)) as FunctionResult<T> | null;
+
+  if (!response.ok || !parsed) {
+    const errorPayload = parsed && !parsed.success ? parsed : null;
+    throw new SessionsUiError(
+      errorPayload?.message ?? (response.status === 401 ? "Please sign in again." : "The sessions service did not respond."),
+      errorPayload?.error ?? (response.status === 401 ? "UNAUTHORIZED" : undefined)
+    );
   }
 
-  const queryString = options.query
-    ? new URLSearchParams(
-        Object.entries(options.query)
-          .filter(([, value]) => value !== undefined && value !== "")
-          .map(([key, value]) => [key, String(value)])
-      ).toString()
-    : "";
-
-  const execution = await functions.createExecution({
-    functionId: functionIdFromEndpoint(functionEndpoint),
-    body: options.body ? JSON.stringify(options.body) : "",
-    async: false,
-    xpath: queryString ? `/?${queryString}` : "/",
-    method,
-    headers: {
-      authorization: `Bearer ${jwt}`,
-      "x-retrace-jwt": jwt,
-      "content-type": "application/json"
-    }
-  });
-
-  if (execution.status !== "completed" || !execution.responseBody) {
-    throw new SessionsUiError("The sessions service did not respond.");
-  }
-
-  const parsed = JSON.parse(execution.responseBody) as FunctionResult<T>;
   if (!parsed.success) {
     throw new SessionsUiError(mapMessage(parsed.error, parsed.message), parsed.error);
   }
@@ -179,32 +246,23 @@ async function executeFunction<T>(
 }
 
 async function createAuthedDatabases() {
-  const response = await fetch("/api/auth/jwt", { method: "POST" });
-  if (!response.ok) {
+  let jwt: string;
+  try {
+    jwt = await getSessionJwt();
+  } catch (error) {
     throw new SessionsUiError("Please sign in again.", "UNAUTHORIZED");
   }
 
-  const data = (await response.json()) as { jwt?: string };
-  if (!data.jwt) {
-    throw new SessionsUiError("Please sign in again.", "UNAUTHORIZED");
-  }
-
-  const client = new Client().setEndpoint(endpoint).setProject(projectId).setJWT(data.jwt);
+  const client = new Client().setEndpoint(endpoint).setProject(projectId).setJWT(jwt);
   return new Databases(client);
 }
 
 async function getCurrentUserId() {
-  const response = await fetch("/api/auth/me", { method: "GET" });
-  if (!response.ok) {
+  try {
+    return await getCachedCurrentUserId();
+  } catch {
     throw new SessionsUiError("Please sign in again.", "UNAUTHORIZED");
   }
-
-  const data = (await response.json().catch(() => null)) as { user?: { $id?: string } } | null;
-  if (!data?.user?.$id) {
-    throw new SessionsUiError("Please sign in again.", "UNAUTHORIZED");
-  }
-
-  return data.user.$id;
 }
 
 function isSchemaMismatchError(error: unknown) {
@@ -233,10 +291,20 @@ export async function listSessions(limit = 10, offset = 0) {
 }
 
 export async function getSession(sessionId: string) {
-  const result = await executeFunction<{ session: RetraceSession }>(functionEndpoints.get, ExecutionMethod.GET, {
-    query: { sessionId }
-  });
-  return result.session;
+  try {
+    const result = await executeFunction<{ session: RetraceSession }>(functionEndpoints.get, ExecutionMethod.GET, {
+      query: { sessionId }
+    });
+    return result.session;
+  } catch (error) {
+    const normalized = normalizeSessionsError(error, "Could not load this session. Please try again.");
+    logError("getSession failed", error, {
+      sessionId,
+      code: normalized.code,
+      message: normalized.message
+    });
+    throw normalized;
+  }
 }
 
 export async function updateSession(sessionId: string, fields: Partial<Pick<RetraceSession, "name" | "description" | "status">>) {
@@ -278,6 +346,89 @@ export async function getCaptureDetails(captureId: string) {
     query: { captureId }
   });
   return result.details;
+}
+
+export async function getCheckpointWithAI(checkpointId: string): Promise<CheckpointWithAI> {
+  const db = await createAuthedDatabases();
+  const checkpoint = await db.getDocument(dbId, capturesTableId, checkpointId) as unknown as CaptureItem;
+  const documentAi = normalizeCheckpointAI(checkpoint);
+  const details = await getCaptureDetails(checkpointId).catch(() => null);
+  const detailAi = details ? normalizeCheckpointAI(details) : null;
+  const detailContent =
+    typeof details?.fullContent === "string"
+      ? details.fullContent
+      : typeof (details as { noteContent?: unknown } | null)?.noteContent === "string"
+        ? String((details as { noteContent?: unknown }).noteContent)
+        : "";
+
+  return {
+    ...checkpoint,
+    content: checkpoint.content || detailContent || "",
+    noteContent: checkpoint.noteContent || detailContent || checkpoint.content || "",
+    ...documentAi,
+    ...(detailAi && hasCheckpointAi(detailAi) ? detailAi : {})
+  };
+}
+
+export function pollCheckpointAiStatus(
+  checkpointId: string,
+  onComplete: (data: CheckpointAIData) => void,
+  onFailed: (data?: CheckpointAIData) => void
+): () => void {
+  let stopped = false;
+  let elapsedMs = 0;
+  let timeoutId: number | undefined;
+
+  const poll = async () => {
+    if (stopped) return;
+    try {
+      const checkpoint = await withTimeout(getCheckpointWithAI(checkpointId), checkpointPollRequestTimeoutMs);
+      if (checkpoint.aiStatus === "complete" && checkpoint.aiContext.trim()) {
+        stopped = true;
+        onComplete(checkpoint);
+        return;
+      }
+      if (checkpoint.aiStatus === "failed") {
+        stopped = true;
+        onFailed(checkpoint);
+        return;
+      }
+    } catch {
+      // Keep polling until the timeout. Event-triggered functions can lag briefly.
+    }
+
+    elapsedMs += checkpointPollIntervalMs;
+    if (elapsedMs >= checkpointPollTimeoutMs) {
+      stopped = true;
+      onFailed();
+      return;
+    }
+
+    timeoutId = window.setTimeout(poll, checkpointPollIntervalMs);
+  };
+
+  void poll();
+
+  return () => {
+    stopped = true;
+    if (timeoutId) window.clearTimeout(timeoutId);
+  };
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timeout = window.setTimeout(() => reject(new Error("Checkpoint polling request timed out.")), timeoutMs);
+    promise.then(
+      (value) => {
+        window.clearTimeout(timeout);
+        resolve(value);
+      },
+      (error) => {
+        window.clearTimeout(timeout);
+        reject(error);
+      }
+    );
+  });
 }
 
 // Checkpoint & Session Note Service Extensions (Direct Authed Appwrite DB Queries)
@@ -338,7 +489,7 @@ export async function getCheckpoints(sessionId: string): Promise<CaptureItem[]> 
     const res = await db.listDocuments(dbId, capturesTableId, [
       Query.equal("sessionId", sessionId),
       Query.equal("isCheckpoint", true),
-      Query.orderAsc("createdAt"),
+      Query.orderDesc("createdAt"),
       Query.limit(100)
     ]);
     return res.documents as unknown as CaptureItem[];
@@ -352,12 +503,19 @@ export async function createCheckpoint(
   sessionId: string,
   name: string,
   createdAt = new Date().toISOString(),
-  content = ""
+  content = "",
+  options: { attachmentIds?: string[]; checkpointId?: string } = {}
 ): Promise<CaptureItem> {
   const db = await createAuthedDatabases();
   const userId = await getCurrentUserId();
+  const checkpointId = options.checkpointId || createClientCheckpointId();
+  const attachmentIds = options.attachmentIds ?? [];
 
-  const created = await db.createDocument(dbId, capturesTableId, ID.unique(), {
+  if (attachmentIds.length > 0) {
+    await assignAttachmentsToCheckpoint(attachmentIds, checkpointId);
+  }
+
+  const checkpointData = {
     sessionId,
     userId,
     type: "text",
@@ -365,8 +523,68 @@ export async function createCheckpoint(
     isCheckpoint: true,
     checkpointName: name,
     createdAt
-  });
+  };
+
+  let created;
+  try {
+    created = await db.createDocument(dbId, capturesTableId, ID.custom(checkpointId), {
+      ...checkpointData,
+      aiStatus: "pending"
+    });
+  } catch (error) {
+    if (!isSchemaMismatchError(error)) {
+      if (attachmentIds.length > 0) {
+        await unassignAttachmentsFromCheckpoint(attachmentIds).catch(() => {});
+      }
+      throw error;
+    }
+    try {
+      created = await db.createDocument(dbId, capturesTableId, ID.custom(checkpointId), checkpointData);
+    } catch (fallbackError) {
+      if (attachmentIds.length > 0) {
+        await unassignAttachmentsFromCheckpoint(attachmentIds).catch(() => {});
+      }
+      throw fallbackError;
+    }
+  }
   return created as unknown as CaptureItem;
+}
+
+export async function assignAttachmentsToCheckpoint(attachmentIds: string[], checkpointId: string): Promise<CaptureItem[]> {
+  if (attachmentIds.length === 0) return [];
+  const db = await createAuthedDatabases();
+  const uniqueIds = Array.from(new Set(attachmentIds.filter(Boolean)));
+  const updated = await Promise.all(
+    uniqueIds.map((attachmentId) =>
+      db.updateDocument(dbId, capturesTableId, attachmentId, {
+        checkpointId,
+        isCheckpoint: false,
+        isSessionNote: false
+      })
+    )
+  );
+  return updated as unknown as CaptureItem[];
+}
+
+async function unassignAttachmentsFromCheckpoint(attachmentIds: string[]): Promise<void> {
+  if (attachmentIds.length === 0) return;
+  const db = await createAuthedDatabases();
+  const uniqueIds = Array.from(new Set(attachmentIds.filter(Boolean)));
+  await Promise.all(
+    uniqueIds.map((attachmentId) =>
+      db.updateDocument(dbId, capturesTableId, attachmentId, {
+        checkpointId: ""
+      })
+    )
+  );
+}
+
+function createClientCheckpointId() {
+  const random =
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID().replace(/-/g, "")
+      : `${Date.now()}${Math.random().toString(36).slice(2)}`;
+  return `cp_${random.slice(0, 28)}`;
 }
 
 export async function updateCheckpointNote(checkpointId: string, noteContent: string): Promise<CaptureItem> {
@@ -389,11 +607,14 @@ export async function deleteCheckpoint(checkpointId: string): Promise<void> {
   const db = await createAuthedDatabases();
   
   const attachments = await getCheckpointAttachments(checkpointId);
-  for (const attachment of attachments) {
-    await db.deleteDocument(dbId, capturesTableId, attachment.$id);
-  }
+  await Promise.all(attachments.map((attachment) => db.deleteDocument(dbId, capturesTableId, attachment.$id)));
   
   await db.deleteDocument(dbId, capturesTableId, checkpointId);
+}
+
+export async function deleteCapture(captureId: string): Promise<void> {
+  const db = await createAuthedDatabases();
+  await db.deleteDocument(dbId, capturesTableId, captureId);
 }
 
 export async function getCheckpointAttachments(checkpointId: string): Promise<CaptureItem[]> {
@@ -420,6 +641,36 @@ export async function getCheckpointAttachments(checkpointId: string): Promise<Ca
       throw fallbackError;
     }
   }
+}
+
+export async function getSessionAttachments(sessionId: string): Promise<CaptureItem[]> {
+  const db = await createAuthedDatabases();
+  let res;
+  try {
+    res = await db.listDocuments(dbId, capturesTableId, [
+      Query.equal("sessionId", sessionId),
+      Query.equal("isCheckpoint", false),
+      Query.equal("isSessionNote", false),
+      Query.orderAsc("createdAt"),
+      Query.limit(100)
+    ]);
+  } catch (error) {
+    if (!isSchemaMismatchError(error)) throw error;
+    res = await db.listDocuments(dbId, capturesTableId, [
+      Query.equal("sessionId", sessionId),
+      Query.orderAsc("createdAt"),
+      Query.limit(100)
+    ]);
+  }
+
+  return (res.documents as unknown as CaptureItem[]).filter(
+    (item) =>
+      !item.isCheckpoint &&
+      !item.isSessionNote &&
+      item.sourceTitle !== sessionNoteMarker &&
+      !item.checkpointId?.trim() &&
+      ["url", "video", "file", "pdf", "image", "audio"].includes(item.type)
+  );
 }
 
 export async function getAllSessionSources(sessionId: string): Promise<CaptureItem[]> {
@@ -503,4 +754,95 @@ function compactDocumentData<T extends Record<string, unknown>>(data: T) {
   return Object.fromEntries(
     Object.entries(data).filter(([, value]) => value !== undefined && value !== null)
   ) as Partial<T>;
+}
+
+type CheckpointAiSource = Partial<Omit<CaptureItem, "aiKeyPoints" | "aiSourcesUsed" | "aiDiagrams" | "aiProcessedAt">> &
+  Partial<Omit<CaptureDetails, "aiKeyPoints" | "aiSourcesUsed" | "aiDiagrams" | "aiProcessedAt">> & {
+    aiKeyPoints?: string[] | string;
+    aiSourcesUsed?: SourceReference[] | string;
+    aiDiagrams?: DiagramOutput[] | string;
+    aiKeyFindings?: string[] | string;
+    aiProcessedAt?: string | null;
+  };
+
+function normalizeCheckpointAI(value: CheckpointAiSource): CheckpointAIData {
+  const status = String(value.aiStatus || "pending").toLowerCase();
+  return {
+    aiTitle: value.aiTitle || "",
+    aiContext: value.aiContext || "",
+    aiKeyPoints: normalizeStringList(value.aiKeyPoints ?? value.aiKeyFindings),
+    aiSourcesUsed: normalizeSources(value.aiSourcesUsed),
+    aiDiagrams: normalizeDiagrams(value.aiDiagrams),
+    aiStatus: status === "complete" || status === "processing" || status === "failed" ? status : "pending",
+    aiProcessedAt: value.aiProcessedAt || null,
+    aiCaptureCount: value.aiCaptureCount,
+    aiError: value.aiError
+  };
+}
+
+function normalizeSources(value: unknown): SourceReference[] {
+  const items = parseArray(value);
+  return items
+    .map((item) => {
+      if (!item || typeof item !== "object") return null;
+      const source = item as Partial<SourceReference>;
+      return {
+        title: String(source.title || "Untitled source"),
+        source_type: source.source_type || "text",
+        url: source.url || null,
+        file_id: source.file_id || null,
+        domain: source.domain || null
+      } as SourceReference;
+    })
+    .filter((item): item is SourceReference => Boolean(item));
+}
+
+function normalizeDiagrams(value: unknown): DiagramOutput[] {
+  const items = parseArray(value);
+  return items
+    .map((item) => {
+      if (!item || typeof item !== "object") return null;
+      const diagram = item as Partial<DiagramOutput>;
+      if (!diagram.mermaid_code) return null;
+      return {
+        diagram_type: String(diagram.diagram_type || "Concept diagram"),
+        mermaid_type: diagram.mermaid_type || "graph",
+        mermaid_code: String(diagram.mermaid_code),
+        explanation: String(diagram.explanation || "")
+      } as DiagramOutput;
+    })
+    .filter((item): item is DiagramOutput => Boolean(item));
+}
+
+function parseArray(value: unknown): unknown[] {
+  if (Array.isArray(value)) return value;
+  if (typeof value !== "string") return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function normalizeStringList(value: unknown): string[] {
+  if (Array.isArray(value)) return value.filter((item): item is string => typeof item === "string");
+  if (typeof value !== "string") return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return value.trim() ? [value] : [];
+  }
+}
+
+function hasCheckpointAi(value: CheckpointAIData) {
+  return (
+    value.aiStatus === "processing" ||
+    value.aiStatus === "failed" ||
+    Boolean(value.aiContext) ||
+    Boolean(value.aiKeyPoints.length) ||
+    Boolean(value.aiSourcesUsed.length) ||
+    Boolean(value.aiDiagrams.length)
+  );
 }

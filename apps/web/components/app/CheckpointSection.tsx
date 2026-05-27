@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Icon } from "../Icon";
 import { InlineMediaList } from "./InlineMediaList";
 import { NoteArea } from "./NoteArea";
+import { logError } from "../../lib/debug";
 import {
   renameCheckpoint,
   updateCheckpointNote,
@@ -22,6 +23,7 @@ interface CheckpointSectionProps {
   onUpdate: () => void;
   onAttachmentAdded: (item: CaptureItem) => void;
   onAttachmentDeleted: (item: CaptureItem) => void;
+  isLocked?: boolean;
 }
 
 export function CheckpointSection({
@@ -33,7 +35,8 @@ export function CheckpointSection({
   onToggle,
   onUpdate,
   onAttachmentAdded,
-  onAttachmentDeleted
+  onAttachmentDeleted,
+  isLocked = false
 }: CheckpointSectionProps) {
   const [isEditingName, setIsEditingName] = useState(false);
   const [isEditingNote, setIsEditingNote] = useState(false);
@@ -53,6 +56,7 @@ export function CheckpointSection({
 
   const getLatestContent = useCallback(() => {
     const remoteContent = checkpoint.content || "";
+    if (isLocked) return remoteContent;
     const remoteMs = timestampMs(checkpoint.$updatedAt ?? checkpoint.createdAt);
     try {
       const rawBuffer = window.localStorage.getItem(`retrace_note_checkpoint_${checkpoint.$id}`);
@@ -63,7 +67,7 @@ export function CheckpointSection({
     } catch {
       return remoteContent;
     }
-  }, [checkpoint.$id, checkpoint.$updatedAt, checkpoint.content, checkpoint.createdAt, timestampMs]);
+  }, [checkpoint.$id, checkpoint.$updatedAt, checkpoint.content, checkpoint.createdAt, isLocked, timestampMs]);
 
   useEffect(() => {
     setNameValue(checkpointLabel);
@@ -108,7 +112,7 @@ export function CheckpointSection({
     try {
       await updateCheckpointNote(checkpoint.$id, text);
     } catch (err) {
-      console.error("Failed to save checkpoint note:", err);
+      logError("Failed to save checkpoint note", err, { checkpointId: checkpoint.$id });
       throw err;
     }
   };
@@ -128,7 +132,7 @@ export function CheckpointSection({
     if (!isExpanded) return;
     if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
 
-    if ((event.key === "e" || event.key === "E") && !isEditingNote) {
+    if (!isLocked && (event.key === "e" || event.key === "E") && !isEditingNote) {
       event.preventDefault();
       enterEditMode();
       return;
@@ -153,7 +157,7 @@ export function CheckpointSection({
     >
       <div className="flex items-center justify-between gap-3">
         <div className="flex min-w-0 items-center">
-          {isEditingName ? (
+          {isEditingName && !isLocked ? (
             <form onSubmit={handleRenameSubmit} className="flex min-w-0 items-center gap-2">
               <Icon name="pin" className="h-3.5 w-3.5 flex-shrink-0 text-primary" />
               <input
@@ -190,7 +194,7 @@ export function CheckpointSection({
         </div>
 
         <div className="flex flex-shrink-0 items-center gap-2">
-          {isExpanded && (
+          {isExpanded && !isLocked && (
             <button
               onClick={(event) => {
                 event.stopPropagation();
@@ -213,30 +217,32 @@ export function CheckpointSection({
               )}
             </button>
           )}
-          <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-          <button
-            onClick={(event) => {
-              event.stopPropagation();
-              setIsEditingName(true);
-            }}
-            className="rounded-full p-1 text-text-muted transition-colors hover:bg-neutral-soft hover:text-text-primary"
-            title="Rename checkpoint"
-            type="button"
-          >
-            <Icon name="pencil" className="h-3 w-3" />
-          </button>
-          <button
-            onClick={(event) => {
-              event.stopPropagation();
-              handleDelete();
-            }}
-            className="rounded-full p-1 text-text-muted transition-colors hover:bg-error/10 hover:text-error"
-            title="Delete checkpoint"
-            type="button"
-          >
-            <Icon name="delete" className="h-3 w-3" />
-          </button>
-          </div>
+          {!isLocked && (
+            <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+              <button
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setIsEditingName(true);
+                }}
+                className="rounded-full p-1 text-text-muted transition-colors hover:bg-neutral-soft hover:text-text-primary"
+                title="Rename checkpoint"
+                type="button"
+              >
+                <Icon name="pencil" className="h-3 w-3" />
+              </button>
+              <button
+                onClick={(event) => {
+                  event.stopPropagation();
+                  handleDelete();
+                }}
+                className="rounded-full p-1 text-text-muted transition-colors hover:bg-error/10 hover:text-error"
+                title="Delete checkpoint"
+                type="button"
+              >
+                <Icon name="delete" className="h-3 w-3" />
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -251,7 +257,25 @@ export function CheckpointSection({
             className="overflow-hidden"
           >
             <div className="mt-2 border-t border-border pt-3">
-              {isEditingNote ? (
+              {isLocked && !viewContent.trim() && attachments.length === 0 ? (
+                <p className="text-sm italic leading-relaxed text-text-muted">
+                  Nothing was captured in this checkpoint.
+                </p>
+              ) : isLocked ? (
+                <NoteArea
+                  sessionId={sessionId}
+                  checkpointId={checkpoint.$id}
+                  initialValue={viewContent}
+                  initialUpdatedAt={checkpoint.$updatedAt ?? checkpoint.createdAt}
+                  onSave={handleNoteSave}
+                  onValueChange={setViewContent}
+                  attachments={attachments}
+                  onAttachmentAdded={onAttachmentAdded}
+                  onAttachmentDeleted={onAttachmentDeleted}
+                  placeholder="No notes captured in this checkpoint."
+                  readOnly
+                />
+              ) : isEditingNote ? (
                 <NoteArea
                   sessionId={sessionId}
                   checkpointId={checkpoint.$id}
@@ -266,15 +290,6 @@ export function CheckpointSection({
                 />
               ) : (
                 <CheckpointReadOnlyContent content={viewContent} attachments={attachments} />
-              )}
-              {checkpoint.aiSummary && (
-                <div className="mt-4 rounded-card border border-border bg-surface p-5 shadow-card">
-                  <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-accent">
-                    <Icon name="sparkle" className="h-4 w-4 fill-current text-accent" />
-                    <span>AI Summary</span>
-                  </div>
-                  <p className="font-body text-sm leading-relaxed text-text-primary">{checkpoint.aiSummary}</p>
-                </div>
               )}
             </div>
           </motion.div>

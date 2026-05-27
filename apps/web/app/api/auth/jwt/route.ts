@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { SESSION_COOKIE_NAME, sessionCookieOptions } from "../../../../lib/auth-session";
 import { createSessionAccount } from "../../../../lib/server/appwrite";
+import { readSessionSecret } from "../../../../lib/server/session-cookie";
 
 export const runtime = "nodejs";
 
@@ -11,19 +12,14 @@ function unauthorized() {
 }
 
 export async function POST(request: Request) {
-  const session = request.headers
-    .get("cookie")
-    ?.split(";")
-    .map((part) => part.trim())
-    .find((part) => part.startsWith(`${SESSION_COOKIE_NAME}=`))
-    ?.slice(SESSION_COOKIE_NAME.length + 1);
+  const session = readSessionSecret(request);
 
   if (!session) {
     return unauthorized();
   }
 
   try {
-    const jwt = await createSessionAccount(decodeURIComponent(session)).createJWT({ duration: 900 });
+    const jwt = await createSessionAccount(session).createJWT({ duration: 900 });
     return NextResponse.json({ success: true, jwt: jwt.jwt });
   } catch {
     return unauthorized();

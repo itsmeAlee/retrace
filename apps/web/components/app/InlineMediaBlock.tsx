@@ -1,6 +1,6 @@
 "use client";
 
-/* eslint-disable @next/next/no-img-element */
+import Image from "next/image";
 import { useMemo, useState } from "react";
 import { Icon } from "../Icon";
 import { type CaptureItem } from "../../lib/sessions";
@@ -63,11 +63,14 @@ export function InlineMediaBlock({ item, onDelete }: InlineMediaBlockProps) {
           onClick={() => window.open(getFileDownload(item.fileId || ""), "_blank")}
           type="button"
         >
-          <img
+          <Image
             alt={item.fileName || item.sourceTitle || item.content || "Attached image"}
             className="max-h-96 w-full rounded-note object-contain"
+            height={384}
             loading="lazy"
             src={getFileView(item.fileId)}
+            unoptimized
+            width={768}
           />
         </button>
         <MediaCaption icon="image" label={item.fileName || item.content || "Image"} />
@@ -94,11 +97,14 @@ export function InlineMediaBlock({ item, onDelete }: InlineMediaBlockProps) {
               onClick={() => setIsPlaying(true)}
               type="button"
             >
-              <img
+              <Image
                 alt=""
                 className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.02]"
+                height={360}
                 loading="lazy"
                 src={youtube.thumbnailUrl}
+                unoptimized
+                width={640}
               />
               <span className="absolute inset-0 bg-text-primary/20" />
               <span className="absolute inset-0 flex items-center justify-center">

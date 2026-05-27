@@ -1,16 +1,16 @@
 "use client";
 
-import { motion, useReducedMotion } from "framer-motion";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { AppShell } from "../../components/app/AppShell";
-import { CreateSessionModal } from "../../components/app/CreateSessionModal";
 import { EmptySessionsState } from "../../components/app/EmptySessionsState";
 import { SessionCard } from "../../components/app/SessionCard";
 import { Icon } from "../../components/Icon";
 import { FilterTabs } from "../../components/ui/FilterTabs";
 import { SkeletonCard } from "../../components/ui/SkeletonCard";
 import { Toast } from "../../components/ui/Toast";
+import { uiDurations } from "../../lib/app-constants";
 import { itemLabel, timeAgo } from "../../lib/format";
 import { listSessions, type RetraceSession, type SessionStatus } from "../../lib/sessions";
 
@@ -24,15 +24,14 @@ const filters = [
 type Filter = (typeof filters)[number];
 type FilterValue = Filter["value"];
 
-const fadeUp = (reduce: boolean) => ({
-  hidden: { opacity: 0, y: reduce ? 0 : 16 },
-  show: { opacity: 1, y: 0 }
-});
+const sessionGridClassName = "mt-6 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4";
+const CreateSessionModal = dynamic(
+  () => import("../../components/app/CreateSessionModal").then((mod) => mod.CreateSessionModal),
+  { ssr: false }
+);
 
 export default function SessionsPage() {
   const router = useRouter();
-  const reduce = useReducedMotion();
-  const variants = fadeUp(Boolean(reduce));
   const [modalOpen, setModalOpen] = useState(false);
   const [filter, setFilter] = useState<FilterValue>("all");
   const [sessions, setSessions] = useState<RetraceSession[]>([]);
@@ -43,11 +42,12 @@ export default function SessionsPage() {
   const [toast, setToast] = useState("");
 
   useEffect(() => {
+    let toastTimeout: number | undefined;
     const pendingToast = sessionStorage.getItem("retrace-toast");
     if (pendingToast) {
       sessionStorage.removeItem("retrace-toast");
       setToast(pendingToast);
-      window.setTimeout(() => setToast(""), 3000);
+      toastTimeout = window.setTimeout(() => setToast(""), uiDurations.toastMs);
     }
 
     let active = true;
@@ -66,6 +66,7 @@ export default function SessionsPage() {
       });
     return () => {
       active = false;
+      if (toastTimeout) window.clearTimeout(toastTimeout);
     };
   }, []);
 
@@ -110,20 +111,15 @@ export default function SessionsPage() {
 
           {error ? <p className="mt-5 text-sm text-error">{error}</p> : null}
 
-          <motion.div
-            animate="show"
-            className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3"
-            initial="hidden"
-            transition={{ staggerChildren: reduce ? 0 : 0.08 }}
-          >
+          <div className={sessionGridClassName}>
             {loading
               ? Array.from({ length: 6 }).map((_, index) => (
-                  <motion.div key={index} transition={{ duration: reduce ? 0.2 : 0.4, ease: "easeOut" }} variants={variants}>
+                  <div key={index}>
                     <SkeletonCard />
-                  </motion.div>
+                  </div>
                 ))
               : visibleSessions.map((session) => (
-                  <motion.div key={session.$id} transition={{ duration: reduce ? 0.2 : 0.4, ease: "easeOut" }} variants={variants}>
+                  <div key={session.$id}>
                     <SessionCard
                       description={session.description || "No description yet."}
                       items={itemLabel(session.captureCount)}
@@ -132,9 +128,9 @@ export default function SessionsPage() {
                       time={timeAgo(session.updatedAt)}
                       title={session.name}
                     />
-                  </motion.div>
+                  </div>
                 ))}
-          </motion.div>
+          </div>
 
           {!loading && sessions.length === 0 ? (
             <div className="mt-6">

@@ -1,29 +1,48 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
+import dynamic from "next/dynamic";
 import { useParams, useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { AppShell } from "../../../components/app/AppShell";
 import { DocumentWorkspace } from "../../../components/app/DocumentWorkspace";
 import { NavigatorPanel } from "../../../components/app/NavigatorPanel";
 import { Icon } from "../../../components/Icon";
 import { Toast } from "../../../components/ui/Toast";
+import { uiDurations } from "../../../lib/app-constants";
 import { deleteFile } from "../../../lib/storage";
 import {
+  deleteCapture,
   getSession,
   getSessionNote,
   getCheckpoints,
   getAllSessionSources,
   getCheckpointAttachments,
+  getSessionAttachments,
   type CaptureItem,
   type RetraceSession
 } from "../../../lib/sessions";
+
+const CheckpointContextView = dynamic(
+  () => import("../../../components/app/CheckpointContextView").then((mod) => mod.CheckpointContextView),
+  {
+    loading: () => (
+      <div className="rounded-card border border-border bg-surface p-6 shadow-card">
+        <div className="h-5 w-48 animate-pulse rounded-full bg-neutral-soft" />
+        <div className="mt-5 space-y-3">
+          <div className="h-3.5 w-full animate-pulse rounded-full bg-neutral-soft" />
+          <div className="h-3.5 w-11/12 animate-pulse rounded-full bg-neutral-soft" />
+          <div className="h-3.5 w-2/3 animate-pulse rounded-full bg-neutral-soft" />
+        </div>
+      </div>
+    )
+  }
+);
 
 export default function SessionDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const sessionId = params.id;
-  const checkpointRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   const [modalOpen, setModalOpen] = useState(false);
   const [session, setSession] = useState<RetraceSession | null>(null);
@@ -31,9 +50,11 @@ export default function SessionDetailPage() {
   const [checkpoints, setCheckpoints] = useState<CaptureItem[]>([]);
   const [sources, setSources] = useState<CaptureItem[]>([]);
   const [attachmentsMap, setAttachmentsMap] = useState<Record<string, CaptureItem[]>>({});
-  const [expandedIds, setExpandedIds] = useState<string[]>([]);
-  const [activeCheckpointId, setActiveCheckpointId] = useState<string | null>(null);
   
+  const [activeCheckpointId, setActiveCheckpointId] = useState<string | null>(null);
+  const [activeCheckpointName, setActiveCheckpointName] = useState<string | null>(null);
+  const [activeView, setActiveView] = useState<"doc" | "checkpoint">("doc");
+
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState("");
   const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
@@ -59,8 +80,10 @@ export default function SessionDetailPage() {
         return { id: cp.$id, atts };
       });
 
-      const generalAttachments = await getCheckpointAttachments("");
-      const results = await Promise.all(attachmentsPromises);
+      const [generalAttachments, results] = await Promise.all([
+        getSessionAttachments(sessionId),
+        Promise.all(attachmentsPromises)
+      ]);
 
       const map: Record<string, CaptureItem[]> = {
         session: generalAttachments
@@ -89,7 +112,7 @@ export default function SessionDetailPage() {
 
   useEffect(() => {
     if (!toast) return;
-    const timeout = setTimeout(() => setToast(""), 3000);
+    const timeout = setTimeout(() => setToast(""), uiDurations.toastMs);
     return () => clearTimeout(timeout);
   }, [toast]);
 
@@ -97,35 +120,46 @@ export default function SessionDetailPage() {
     loadAllData(true);
   };
 
-  const handleToggleCheckpoint = (checkpointId: string) => {
+  const handleCheckpointClick = (checkpointId: string, checkpointName?: string) => {
     setActiveCheckpointId(checkpointId);
-    setExpandedIds((prev) =>
-      prev.includes(checkpointId) ? prev.filter((id) => id !== checkpointId) : [...prev, checkpointId]
-    );
+    setActiveCheckpointName(checkpointName || null);
+    setActiveView("checkpoint");
   };
 
-  const handleCheckpointClick = (checkpointId: string) => {
-    setActiveCheckpointId(checkpointId);
-    setExpandedIds((prev) => (prev.includes(checkpointId) ? prev : [...prev, checkpointId]));
-    setTimeout(() => {
-      const element = checkpointRefs.current[checkpointId];
-      if (element) {
-        element.scrollIntoView({ behavior: "smooth", block: "start" });
-      }
-    }, 150);
+  const returnToDocMode = () => {
+    setActiveView("doc");
+    setActiveCheckpointId(null);
+    setActiveCheckpointName(null);
   };
 
-  const handleCheckpointCreated = (checkpointId: string) => {
-    setActiveCheckpointId(checkpointId);
-    setExpandedIds((prev) => prev.filter((id) => id !== checkpointId));
-    loadAllData(true).then(() => {
-      setTimeout(() => {
-        const element = checkpointRefs.current[checkpointId];
-        if (element) {
-          element.scrollIntoView({ behavior: "smooth", block: "center" });
-        }
-      }, 150);
+  const continueWorking = () => {
+    setActiveView("doc");
+    window.setTimeout(() => {
+      document.getElementById("session-current-notes")?.scrollIntoView({ behavior: "smooth", block: "end" });
+      const textarea = document.querySelector<HTMLTextAreaElement>("#session-current-notes textarea:not([readonly])");
+      textarea?.focus();
+    }, 50);
+  };
+
+  const handleCheckpointCreated = (checkpoint: CaptureItem, movedAttachmentIds: string[]) => {
+    const movedIds = new Set(movedAttachmentIds);
+    setActiveCheckpointId(checkpoint.$id);
+    setCheckpoints((prev) => [checkpoint, ...prev.filter((item) => item.$id !== checkpoint.$id)]);
+    setSessionNote((prev) => prev ? { ...prev, content: "", $updatedAt: new Date().toISOString() } : prev);
+    setAttachmentsMap((prev) => {
+      const moved = (prev.session || []).filter((attachment) => movedIds.has(attachment.$id));
+      return {
+        ...prev,
+        session: (prev.session || []).filter((attachment) => !movedIds.has(attachment.$id)),
+        [checkpoint.$id]: [
+          ...(prev[checkpoint.$id] || []),
+          ...moved.map((attachment) => ({ ...attachment, checkpointId: checkpoint.$id }))
+        ]
+      };
     });
+    setSources((prev) => prev.filter((source) => !movedIds.has(source.$id)));
+    setToast("Checkpoint saved.");
+    void loadAllData(true);
   };
 
   const handleAttachmentAdded = (item: CaptureItem) => {
@@ -139,9 +173,6 @@ export default function SessionDetailPage() {
   };
 
   const handleAttachmentDeleted = (item: CaptureItem) => {
-    const previousAttachments = attachmentsMap;
-    const previousSources = sources;
-
     setAttachmentsMap((prev) => {
       const next = { ...prev };
       Object.keys(next).forEach((key) => {
@@ -151,25 +182,12 @@ export default function SessionDetailPage() {
     });
     setSources((prev) => prev.filter((source) => source.$id !== item.$id));
 
-    void deleteAttachmentInBackground(item, previousAttachments, previousSources);
+    void deleteAttachmentInBackground(item);
   };
 
-  const deleteAttachmentInBackground = async (
-    item: CaptureItem,
-    previousAttachments: Record<string, CaptureItem[]>,
-    previousSources: CaptureItem[]
-  ) => {
+  const deleteAttachmentInBackground = async (item: CaptureItem) => {
     try {
-      const { appwriteClient } = await import("../../../lib/appwrite");
-      const { Databases } = await import("appwrite");
-      const response = await fetch("/api/auth/jwt", { method: "POST" });
-      if (!response.ok) throw new Error("Missing auth session.");
-      const data = await response.json();
-      if (!data.jwt) throw new Error("Missing auth session.");
-
-      const client = appwriteClient.setJWT(data.jwt);
-      const db = new Databases(client);
-      await db.deleteDocument("retrace_auth", "capture_items", item.$id);
+      await deleteCapture(item.$id);
       if (item.fileId) {
         await deleteFile(item.fileId).catch(() => {});
       }
@@ -177,8 +195,14 @@ export default function SessionDetailPage() {
       getAllSessionSources(sessionId).then(setSources);
       setToast("Attachment deleted.");
     } catch {
-      setAttachmentsMap(previousAttachments);
-      setSources(previousSources);
+      const key = item.checkpointId?.trim() || "session";
+      setAttachmentsMap((prev) => ({
+        ...prev,
+        [key]: prev[key]?.some((attachment) => attachment.$id === item.$id)
+          ? prev[key]
+          : [...(prev[key] || []), item]
+      }));
+      setSources((prev) => (prev.some((source) => source.$id === item.$id) ? prev : [item, ...prev]));
       setToast("Could not delete attachment.");
     }
   };
@@ -206,30 +230,50 @@ export default function SessionDetailPage() {
             {/* Main workspace (Column 2) */}
             <div className="min-h-screen flex-1 px-6 py-8 md:px-10">
               <div className="mx-auto w-full max-w-4xl">
-                {/* Back Button */}
-                <button
-                  onClick={() => router.push("/sessions")}
-                  className="mb-6 flex items-center gap-2 text-xs font-semibold text-text-muted hover:text-primary uppercase tracking-wider transition-colors"
-                  type="button"
-                >
-                  <Icon className="h-4 w-4" name="arrow-left" />
-                  Back to Sessions
-                </button>
+                {/* Back & Export Row */}
+                <div className="flex items-center justify-between mb-6">
+                  {activeView === "checkpoint" ? (
+                    <div />
+                  ) : (
+                    <button
+                      onClick={() => router.push("/sessions")}
+                      className="flex items-center gap-2 text-xs font-semibold text-text-muted hover:text-primary uppercase tracking-wider transition-colors"
+                      type="button"
+                    >
+                      <Icon className="h-4 w-4" name="arrow-left" />
+                      Back to Sessions
+                    </button>
+                  )}
 
-                {session && (
-                  <DocumentWorkspace
-                    session={session}
-                    sessionNote={sessionNote}
-                    checkpoints={checkpoints}
-                    attachmentsMap={attachmentsMap}
-                    expandedIds={expandedIds}
-                    onToggleCheckpoint={handleToggleCheckpoint}
-                    onRefresh={refreshData}
-                    onAttachmentAdded={handleAttachmentAdded}
-                    onAttachmentDeleted={handleAttachmentDeleted}
-                    onCheckpointCreated={handleCheckpointCreated}
-                    checkpointRefs={checkpointRefs}
+                  <button
+                    onClick={() => setToast("Export coming soon.")}
+                    className="h-[36px] px-4 rounded-form border border-border text-xs font-semibold text-text-muted hover:text-primary hover:border-primary transition-all uppercase tracking-wider"
+                    type="button"
+                  >
+                    Export
+                  </button>
+                </div>
+
+                {activeView === "checkpoint" && activeCheckpointId ? (
+                  <CheckpointContextView
+                    checkpointId={activeCheckpointId}
+                    checkpointName={activeCheckpointName || checkpoints.find((item) => item.$id === activeCheckpointId)?.checkpointName || ""}
+                    sessionId={sessionId}
+                    onBack={returnToDocMode}
+                    onContinue={continueWorking}
                   />
+                ) : (
+                  session && (
+                    <DocumentWorkspace
+                      session={session}
+                      sessionNote={sessionNote}
+                      attachmentsMap={attachmentsMap}
+                      onRefresh={refreshData}
+                      onAttachmentAdded={handleAttachmentAdded}
+                      onAttachmentDeleted={handleAttachmentDeleted}
+                      onCheckpointCreated={handleCheckpointCreated}
+                    />
+                  )
                 )}
               </div>
             </div>
@@ -239,8 +283,10 @@ export default function SessionDetailPage() {
               <NavigatorPanel
                 checkpoints={checkpoints}
                 sources={sources}
-                activeId={activeCheckpointId}
-                onCheckpointClick={handleCheckpointClick}
+                activeCheckpointId={activeCheckpointId}
+                activeView={activeView}
+                onCheckpointSelect={handleCheckpointClick}
+                onBack={returnToDocMode}
               />
             </div>
 
@@ -291,11 +337,13 @@ export default function SessionDetailPage() {
                     <NavigatorPanel
                       checkpoints={checkpoints}
                       sources={sources}
-                      activeId={activeCheckpointId}
-                      onCheckpointClick={(id) => {
-                        handleCheckpointClick(id);
+                      activeCheckpointId={activeCheckpointId}
+                      activeView={activeView}
+                      onCheckpointSelect={(id, name) => {
+                        handleCheckpointClick(id, name);
                         setIsMobileDrawerOpen(false);
                       }}
+                      onBack={returnToDocMode}
                     />
                   </motion.div>
                 </>

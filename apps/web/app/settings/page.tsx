@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { AppShell } from "../../components/app/AppShell";
 import { CreateSessionModal } from "../../components/app/CreateSessionModal";
 import { Toast } from "../../components/ui/Toast";
+import { uiDurations } from "../../lib/app-constants";
 
 export default function SettingsPage() {
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -13,7 +14,7 @@ export default function SettingsPage() {
 
   useEffect(() => {
     if (!toast) return;
-    const timeout = window.setTimeout(() => setToast(""), 3000);
+    const timeout = window.setTimeout(() => setToast(""), uiDurations.toastMs);
     return () => window.clearTimeout(timeout);
   }, [toast]);
 

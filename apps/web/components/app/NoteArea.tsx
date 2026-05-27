@@ -4,6 +4,8 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { AttachmentToolbar } from "./AttachmentToolbar";
 import { InlineMediaList } from "./InlineMediaList";
+import { uiDurations, uploadLimits } from "../../lib/app-constants";
+import { logError } from "../../lib/debug";
 import { addAttachment, type CaptureItem } from "../../lib/sessions";
 import { deleteFile, uploadFile } from "../../lib/storage";
 
@@ -18,6 +20,7 @@ interface NoteAreaProps {
   attachments?: CaptureItem[];
   onAttachmentAdded: (item: CaptureItem) => void;
   onAttachmentDeleted?: (item: CaptureItem) => void;
+  readOnly?: boolean;
 }
 
 export function NoteArea({
@@ -30,7 +33,8 @@ export function NoteArea({
   placeholder = "Start writing here...",
   attachments = [],
   onAttachmentAdded,
-  onAttachmentDeleted
+  onAttachmentDeleted,
+  readOnly = false
 }: NoteAreaProps) {
   type SaveStatus = "saved" | "saving" | "local";
   type LocalNoteBuffer = {
@@ -47,6 +51,7 @@ export function NoteArea({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const afterTextareaRef = useRef<HTMLTextAreaElement>(null);
   const debouncedSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const feedbackTimeoutsRef = useRef<number[]>([]);
   const documentKey = checkpointId ?? `session:${sessionId}`;
   const documentKeyRef = useRef(documentKey);
   const localStorageKeyRef = useRef(localStorageKey);
@@ -58,6 +63,14 @@ export function NoteArea({
   const saveVersionRef = useRef(0);
   const onSaveRef = useRef(onSave);
   const [mediaBoundary, setMediaBoundary] = useState<number | null>(null);
+
+  const clearFeedbackLater = useCallback((callback: () => void, delay: number) => {
+    const timeout = window.setTimeout(() => {
+      feedbackTimeoutsRef.current = feedbackTimeoutsRef.current.filter((item) => item !== timeout);
+      callback();
+    }, delay);
+    feedbackTimeoutsRef.current.push(timeout);
+  }, []);
 
   useEffect(() => {
     onSaveRef.current = onSave;
@@ -150,14 +163,14 @@ export function NoteArea({
           setSaveStatus("saving");
         }
       } catch (err) {
-        console.error("Failed to save note:", err);
+        logError("Failed to save note", err, { checkpointId, sessionId });
         if (saveVersion === saveVersionRef.current) {
           setSaveStatus("local");
           setSaveError("");
         }
       }
     },
-    [clearLocalBuffer, readLocalBuffer]
+    [checkpointId, clearLocalBuffer, readLocalBuffer, sessionId]
   );
 
   useEffect(() => {
@@ -230,7 +243,7 @@ export function NoteArea({
     }
 
     setShowSavedStatus(true);
-    const timeout = window.setTimeout(() => setShowSavedStatus(false), 2000);
+    const timeout = window.setTimeout(() => setShowSavedStatus(false), uiDurations.savedStatusMs);
     return () => window.clearTimeout(timeout);
   }, [saveStatus]);
 
@@ -247,12 +260,13 @@ export function NoteArea({
       debouncedSaveRef.current = setTimeout(() => {
         debouncedSaveRef.current = null;
         void saveNow(nextValue, bufferUpdatedAt);
-      }, 1500);
+      }, uiDurations.noteAutosaveMs);
     },
     [saveNow]
   );
 
   const applyValueChange = (val: string) => {
+    if (readOnly) return;
     valueRef.current = val;
     setValue(val);
     onValueChange?.(val);
@@ -278,15 +292,16 @@ export function NoteArea({
   };
 
   const handlePaste = async (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    if (readOnly) return;
     const files = Array.from(event.clipboardData.files);
     const image = files.find((file) => file.type.startsWith("image/"));
     if (!image) return;
 
     event.preventDefault();
 
-    if (image.size > 2 * 1024 * 1024) {
+    if (image.size > uploadLimits.pastedImageBytes) {
       setSaveError("Images must be 2MB or smaller.");
-      window.setTimeout(() => setSaveError(""), 3000);
+      clearFeedbackLater(() => setSaveError(""), uiDurations.toastMs);
       return;
     }
 
@@ -297,7 +312,7 @@ export function NoteArea({
       const uploaded = await uploadFile(image, sessionId, (progress) => setMediaStatus(`Uploading image ${progress}%...`));
       uploadedFileId = uploaded.fileId;
       setMediaStatus("Saving image...");
-      const created = await addAttachment(sessionId, checkpointId, "file", {
+      const created = await addAttachment(sessionId, checkpointId, "image", {
         content: image.name || "Pasted image",
         sourceTitle: image.name || "Pasted image",
         fileName: image.name || "pasted-image.png",
@@ -308,18 +323,19 @@ export function NoteArea({
       });
       handleAttachmentAdded(created);
       setMediaStatus("Image added.");
-      window.setTimeout(() => setMediaStatus(""), 2000);
+      clearFeedbackLater(() => setMediaStatus(""), uiDurations.savedStatusMs);
     } catch (err: any) {
       if (uploadedFileId) {
         void deleteFile(uploadedFileId).catch(() => {});
       }
       setMediaStatus("");
       setSaveError(err?.message || "Could not add pasted image.");
-      window.setTimeout(() => setSaveError(""), 3000);
+      clearFeedbackLater(() => setSaveError(""), uiDurations.toastMs);
     }
   };
 
   const handleTranscript = async (text: string) => {
+    if (readOnly) return;
     const cleanText = text.trim();
     if (!cleanText) return;
 
@@ -349,6 +365,7 @@ export function NoteArea({
   };
 
   const handleAttachmentAdded = (item: CaptureItem) => {
+    if (readOnly) return;
     onAttachmentAdded(item);
     if (mediaBoundary === null) {
       const boundary = valueRef.current.length;
@@ -387,6 +404,8 @@ export function NoteArea({
       if (debouncedSaveRef.current) {
         clearTimeout(debouncedSaveRef.current);
       }
+      feedbackTimeoutsRef.current.forEach((timeout) => window.clearTimeout(timeout));
+      feedbackTimeoutsRef.current = [];
     };
   }, [readLocalBuffer, saveNow]);
 
@@ -399,6 +418,7 @@ export function NoteArea({
             value={beforeMediaText}
             onChange={(event) => updateSplitText(event.target.value, afterMediaText)}
             onPaste={handlePaste}
+            readOnly={readOnly}
             onFocus={() => {
               focusedRef.current = true;
             }}
@@ -413,14 +433,15 @@ export function NoteArea({
             }}
             placeholder={placeholder}
             rows={1}
-            className="w-full bg-transparent border-0 outline-none resize-none text-text-primary text-base placeholder-text-muted focus:ring-0 p-0 font-body leading-relaxed"
+            className={`w-full bg-transparent border-0 outline-none resize-none text-text-primary text-base placeholder-text-muted focus:ring-0 p-0 font-body leading-relaxed ${readOnly ? "cursor-default" : ""}`}
           />
-          <InlineMediaList attachments={attachments} onDelete={onAttachmentDeleted} />
+          <InlineMediaList attachments={attachments} onDelete={readOnly ? undefined : onAttachmentDeleted} />
           <textarea
             ref={afterTextareaRef}
             value={afterMediaText}
             onChange={(event) => updateSplitText(beforeMediaText, event.target.value)}
             onPaste={handlePaste}
+            readOnly={readOnly}
             onFocus={() => {
               focusedRef.current = true;
             }}
@@ -435,7 +456,7 @@ export function NoteArea({
             }}
             placeholder="Continue writing..."
             rows={1}
-            className="mt-3 w-full bg-transparent border-0 outline-none resize-none text-text-primary text-base placeholder-text-muted focus:ring-0 p-0 font-body leading-relaxed"
+            className={`mt-3 w-full bg-transparent border-0 outline-none resize-none text-text-primary text-base placeholder-text-muted focus:ring-0 p-0 font-body leading-relaxed ${readOnly ? "cursor-default" : ""}`}
           />
         </>
       ) : (
@@ -444,6 +465,7 @@ export function NoteArea({
         value={value}
         onChange={handleChange}
         onPaste={handlePaste}
+        readOnly={readOnly}
         onFocus={() => {
           focusedRef.current = true;
         }}
@@ -458,23 +480,25 @@ export function NoteArea({
         }}
         placeholder={placeholder}
         rows={1}
-        className="w-full bg-transparent border-0 outline-none resize-none text-text-primary text-base placeholder-text-muted focus:ring-0 p-0 font-body leading-relaxed"
+        className={`w-full bg-transparent border-0 outline-none resize-none text-text-primary text-base placeholder-text-muted focus:ring-0 p-0 font-body leading-relaxed ${readOnly ? "cursor-default" : ""}`}
       />
       )}
-      <AttachmentToolbar
-        sessionId={sessionId}
-        checkpointId={checkpointId}
-        onAttachmentAdded={handleAttachmentAdded}
-        onTranscript={handleTranscript}
-        saveStatusSlot={
-          <SaveStatusIndicator
-            error={saveError}
-            mediaStatus={mediaStatus}
-            status={saveStatus}
-            showSaved={showSavedStatus}
-          />
-        }
-      />
+      {!readOnly && (
+        <AttachmentToolbar
+          sessionId={sessionId}
+          checkpointId={checkpointId}
+          onAttachmentAdded={handleAttachmentAdded}
+          onTranscript={handleTranscript}
+          saveStatusSlot={
+            <SaveStatusIndicator
+              error={saveError}
+              mediaStatus={mediaStatus}
+              status={saveStatus}
+              showSaved={showSavedStatus}
+            />
+          }
+        />
+      )}
     </div>
   );
 }

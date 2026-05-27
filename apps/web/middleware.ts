@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { SESSION_COOKIE_NAME } from "./lib/auth-session";
 
-const sessionCookieName = "retrace-session";
 const authPrefix = "/auth";
 
 function isProtectedRoute(pathname: string) {
@@ -10,7 +10,7 @@ function isProtectedRoute(pathname: string) {
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  const hasSession = request.cookies.has(sessionCookieName);
+  const hasSession = request.cookies.has(SESSION_COOKIE_NAME);
 
   if (hasSession && pathname.startsWith(authPrefix)) {
     return NextResponse.redirect(new URL("/", request.url));

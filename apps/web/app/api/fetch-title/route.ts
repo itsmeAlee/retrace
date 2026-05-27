@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import dns from "dns";
 import { promisify } from "util";
+import { uiDurations } from "../../../lib/app-constants";
 
 const lookup = promisify(dns.lookup);
 
@@ -24,17 +25,15 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Private IPs are not allowed" }, { status: 400 });
     }
 
-    // Fetch the URL with a 3s timeout
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3000);
+    const timeoutId = setTimeout(() => controller.abort(), uiDurations.pageTitleFetchTimeoutMs);
 
     const response = await fetch(urlString, {
       signal: controller.signal,
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
       }
-    });
-    clearTimeout(timeoutId);
+    }).finally(() => clearTimeout(timeoutId));
 
     if (!response.ok) {
       return NextResponse.json({ error: "Failed to fetch page" }, { status: 400 });

@@ -1,0 +1,26 @@
+[mcp_servers.context7]
+command = "npx"
+args = ["-y", "@upstash/context7-mcp@latest"]
+enabled = true
+[mcp_servers.context7.env]
+CONTEXT7_API_KEY = "ctx7sk-0b5d191b-f3fe-4ecc-a505-73d7b4d78da7"
+
+[mcp_servers.appwrite-api]
+command = "uvx"
+args = ["mcp-server-appwrite"]
+enabled = true
+[mcp_servers.appwrite-api.env]
+APPWRITE_API_KEY = "standard_184283a5e53d337141dce32a41d0cb1f4b49756455016f3afd492096d65d34695c0f7688348e5d296ba36f67eee03099f8cad1f2a2e5f0ac76d2b3ab395b7c140de2c62295de0f406170dbdb94507ee2f0354748016b418488f2ae54727206baec05075cde96084085e8bcdd55bf57dfd5774311700cc53a2d3906f6e6ae5b5d"
+APPWRITE_ENDPOINT = "https://fra.cloud.appwrite.io/v1"
+APPWRITE_PROJECT_ID = "retrace"
+
+[mcp_servers.appwrite-api.tools.appwrite_search_tools]
+approval_mode = "approve"
+
+
+[mcp_servers.appwrite-docs]
+url = "https://mcp-for-docs.appwrite.io/sse"
+enabled = true
+
+[mcp_servers.langchain-docs]
+url = "https://docs.langchain.com/mcp"

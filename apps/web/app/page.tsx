@@ -1,12 +1,10 @@
 "use client";
 
-import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AppShell } from "../components/app/AppShell";
-import { CreateSessionModal } from "../components/app/CreateSessionModal";
-import { GettingStartedCards } from "../components/app/GettingStartedCards";
 import { NewSessionCard } from "../components/app/NewSessionCard";
 import { OnboardingProgress } from "../components/app/OnboardingProgress";
 import { SessionCard } from "../components/app/SessionCard";
@@ -15,15 +13,26 @@ import { SkeletonCard } from "../components/ui/SkeletonCard";
 import { itemLabel, timeAgo } from "../lib/format";
 import { listSessions, type RetraceSession } from "../lib/sessions";
 
-const fadeUp = (reduce: boolean) => ({
-  hidden: { opacity: 0, y: reduce ? 0 : 16 },
-  show: { opacity: 1, y: 0 }
-});
+const sessionGridClassName = "mt-4 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4";
+const CreateSessionModal = dynamic(
+  () => import("../components/app/CreateSessionModal").then((mod) => mod.CreateSessionModal),
+  { ssr: false }
+);
+const GettingStartedCards = dynamic(
+  () => import("../components/app/GettingStartedCards").then((mod) => mod.GettingStartedCards),
+  {
+    loading: () => (
+      <div className={sessionGridClassName}>
+        {Array.from({ length: 4 }).map((_, index) => (
+          <SkeletonCard key={index} />
+        ))}
+      </div>
+    )
+  }
+);
 
 export default function Page() {
   const router = useRouter();
-  const reduce = useReducedMotion();
-  const variants = fadeUp(Boolean(reduce));
   const [modalOpen, setModalOpen] = useState(false);
   const [sessions, setSessions] = useState<RetraceSession[]>([]);
   const [loading, setLoading] = useState(true);
@@ -52,21 +61,18 @@ export default function Page() {
     <AppShell onNewSession={() => setModalOpen(true)}>
       {({ firstName }) => (
         <>
-          <motion.header animate="show" initial="hidden" transition={{ duration: reduce ? 0.2 : 0.4, ease: "easeOut" }} variants={variants}>
+          <header>
             <h1 className="font-heading text-greeting font-semibold text-text-primary">Good morning, {firstName}.</h1>
             <p className="mt-2 text-md text-text-muted">Here is where you left off.</p>
-            <motion.button
-              className="mt-6 flex h-11 items-center gap-3 rounded-pill bg-primary px-6 text-base font-medium text-white shadow-card-hover transition-colors hover:bg-primary-hover"
+            <button
+              className="mt-6 flex h-11 items-center gap-3 rounded-pill bg-primary px-6 text-base font-medium text-white shadow-card-hover transition-all hover:scale-[1.02] hover:bg-primary-hover active:scale-[0.98] motion-reduce:hover:scale-100 motion-reduce:active:scale-100"
               onClick={() => setModalOpen(true)}
-              transition={{ duration: 0.2, type: "spring", stiffness: 320, damping: 24 }}
               type="button"
-              whileHover={reduce ? undefined : { scale: 1.02 }}
-              whileTap={reduce ? undefined : { scale: 0.98 }}
             >
               <Icon className="h-5 w-5" name="plus-circle" />
               + Start a new session
-            </motion.button>
-          </motion.header>
+            </button>
+          </header>
 
           <section className="mt-10">
             <div className="flex items-center justify-between">
@@ -78,54 +84,33 @@ export default function Page() {
               ) : null}
             </div>
             {error ? <p className="mt-4 text-sm text-error">{error}</p> : null}
-            <AnimatePresence mode="wait">
-              {loading ? (
-                <motion.div
-                  animate="show"
-                  className="mt-4 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4"
-                  exit={{ opacity: 0 }}
-                  initial="hidden"
-                  key="loading"
-                  transition={{ staggerChildren: reduce ? 0 : 0.08 }}
-                >
-                  {Array.from({ length: 4 }).map((_, index) => (
-                    <motion.div key={index} transition={{ duration: reduce ? 0.2 : 0.4, ease: "easeOut" }} variants={variants}>
-                      <SkeletonCard />
-                    </motion.div>
-                  ))}
-                </motion.div>
-              ) : sessions.length === 0 ? (
-                <motion.div className="mt-4" key="empty">
-                  <GettingStartedCards onCreateSession={() => setModalOpen(true)} />
-                  <OnboardingProgress hasSessions={false} />
-                </motion.div>
-              ) : (
-                <motion.div
-                  animate="show"
-                  className="mt-4 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4"
-                  exit={{ opacity: 0 }}
-                  initial="hidden"
-                  key="populated"
-                  transition={{ staggerChildren: reduce ? 0 : 0.08 }}
-                >
-                  {sessions.map((session) => (
-                    <motion.div key={session.$id} transition={{ duration: reduce ? 0.2 : 0.4, ease: "easeOut" }} variants={variants}>
-                      <SessionCard
-                        description={session.description || "No description yet."}
-                        items={itemLabel(session.captureCount)}
-                        onClick={() => router.push(`/sessions/${session.$id}`)}
-                        status={session.status}
-                        time={timeAgo(session.updatedAt)}
-                        title={session.name}
-                      />
-                    </motion.div>
-                  ))}
-                  <motion.div transition={{ duration: reduce ? 0.2 : 0.4, ease: "easeOut" }} variants={variants}>
-                    <NewSessionCard onClick={() => setModalOpen(true)} />
-                  </motion.div>
-                </motion.div>
-              )}
-            </AnimatePresence>
+            {loading ? (
+              <div className={sessionGridClassName}>
+                {Array.from({ length: 4 }).map((_, index) => (
+                  <SkeletonCard key={index} />
+                ))}
+              </div>
+            ) : sessions.length === 0 ? (
+              <div className="mt-4">
+                <GettingStartedCards onCreateSession={() => setModalOpen(true)} />
+                <OnboardingProgress hasSessions={false} />
+              </div>
+            ) : (
+              <div className={sessionGridClassName}>
+                {sessions.map((session) => (
+                  <SessionCard
+                    key={session.$id}
+                    description={session.description || "No description yet."}
+                    items={itemLabel(session.captureCount)}
+                    onClick={() => router.push(`/sessions/${session.$id}`)}
+                    status={session.status}
+                    time={timeAgo(session.updatedAt)}
+                    title={session.name}
+                  />
+                ))}
+                <NewSessionCard onClick={() => setModalOpen(true)} />
+              </div>
+            )}
           </section>
 
           <section className="mt-10">

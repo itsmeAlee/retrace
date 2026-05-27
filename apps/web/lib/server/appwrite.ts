@@ -1,7 +1,7 @@
 import "server-only";
 
 import type { Models } from "node-appwrite";
-import { Account, Client, Databases, Storage, Users } from "node-appwrite";
+import { Account, Client, Databases, Functions, Storage, Users } from "node-appwrite";
 
 function requiredEnv(name: string, fallback?: string) {
   const value = process.env[name] ?? fallback;
@@ -31,6 +31,10 @@ export function createAdminAccount() {
 
 export function createAdminUsers() {
   return new Users(baseClient().setKey(apiKey));
+}
+
+export function createAdminFunctions() {
+  return new Functions(baseClient().setKey(apiKey));
 }
 
 export async function markEmailVerified(userId: string) {

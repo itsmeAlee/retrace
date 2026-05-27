@@ -25,9 +25,11 @@ export function AppShell({ children, contentClassName = "mx-auto max-w-[1200px] 
 
   useEffect(() => {
     let active = true;
-    getUser().then((currentUser) => {
+    getUser().then(async (currentUser) => {
       if (!active) return;
       if (!currentUser) {
+        await logout();
+        if (!active) return;
         router.replace("/auth/signin");
         return;
       }

@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Icon } from "../Icon";
+import { uiDurations, uploadLimits } from "../../lib/app-constants";
 import { addAttachment, type CaptureItem, type CaptureType } from "../../lib/sessions";
 import { deleteFile, uploadFile } from "../../lib/storage";
 import { useVoiceRecorder } from "../../hooks/useVoiceRecorder";
@@ -33,13 +34,28 @@ export function AttachmentToolbar({
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [waitingForAudio, setWaitingForAudio] = useState(false);
   const processedBlobRef = useRef<Blob | null>(null);
+  const toastTimeoutRef = useRef<number | null>(null);
 
   const recorder = useVoiceRecorder();
   const { amplitudes, audioBlob, audioDuration, reset, startRecording, state: recorderState, stopRecording } = recorder;
 
   const triggerToast = useCallback((msg: string) => {
+    if (toastTimeoutRef.current) {
+      window.clearTimeout(toastTimeoutRef.current);
+    }
     setToastMessage(msg);
-    setTimeout(() => setToastMessage(""), 3000);
+    toastTimeoutRef.current = window.setTimeout(() => {
+      setToastMessage("");
+      toastTimeoutRef.current = null;
+    }, uiDurations.toastMs);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimeoutRef.current) {
+        window.clearTimeout(toastTimeoutRef.current);
+      }
+    };
   }, []);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -47,7 +63,7 @@ export function AttachmentToolbar({
     if (!file) return;
 
     const isImage = file.type.startsWith("image/");
-    const maxSize = isImage ? 2 * 1024 * 1024 : 5 * 1024 * 1024;
+    const maxSize = isImage ? uploadLimits.inlineImageBytes : uploadLimits.inlineFileBytes;
     if (file.size > maxSize) {
       triggerToast(isImage ? "Images must be 2MB or smaller." : "Files must be 5MB or smaller.");
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -67,7 +83,7 @@ export function AttachmentToolbar({
       uploadedFileId = uploaded.fileId;
       setUploadProgress(100);
       setUploadStage("saving");
-      const captureType: CaptureType = "file";
+      const captureType: CaptureType = isImage ? "image" : file.type === "application/pdf" ? "pdf" : "file";
 
       const created = await addAttachment(sessionId, checkpointId, captureType, {
         content: file.name,
@@ -107,7 +123,8 @@ export function AttachmentToolbar({
     try {
       const title = await resolveUrlTitle(targetUrl);
 
-      const created = await addAttachment(sessionId, checkpointId, "url", {
+      const captureType: CaptureType = isYouTubeUrl(targetUrl) ? "video" : "url";
+      const created = await addAttachment(sessionId, checkpointId, captureType, {
         content: targetUrl,
         sourceUrl: targetUrl,
         sourceTitle: title
@@ -145,7 +162,7 @@ export function AttachmentToolbar({
       setWaitingForAudio(false);
       triggerToast("No audio was captured. Try again.");
       reset();
-    }, 5000);
+    }, uiDurations.voiceAudioWaitMs);
     return () => window.clearTimeout(timeout);
   }, [reset, triggerToast, waitingForAudio]);
 
@@ -157,7 +174,7 @@ export function AttachmentToolbar({
     setIsTranscribing(true);
 
     const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), 25000);
+    const timeout = window.setTimeout(() => controller.abort(), uiDurations.voiceTranscribeTimeoutMs);
 
     async function transcribeAndAttach() {
       try {
@@ -386,7 +403,7 @@ async function resolveUrlTitle(targetUrl: string) {
   if (isYouTubeUrl(targetUrl)) return fallbackTitle;
 
   const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), 1500);
+  const timeout = window.setTimeout(() => controller.abort(), uiDurations.titleFetchTimeoutMs);
   try {
     const res = await fetch(`/api/fetch-title?url=${encodeURIComponent(targetUrl)}`, {
       signal: controller.signal

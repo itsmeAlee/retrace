@@ -2,8 +2,9 @@
 
 import React, { useEffect, useState } from "react";
 import { Icon } from "../Icon";
+import { uiDurations } from "../../lib/app-constants";
+import { logError } from "../../lib/debug";
 import { NoteArea } from "./NoteArea";
-import { CheckpointSection } from "./CheckpointSection";
 import {
   createCheckpoint,
   updateSession,
@@ -15,35 +16,33 @@ import {
 interface DocumentWorkspaceProps {
   session: RetraceSession;
   sessionNote: CaptureItem | null;
-  checkpoints: CaptureItem[];
   attachmentsMap: Record<string, CaptureItem[]>;
-  expandedIds: string[];
-  onToggleCheckpoint: (id: string) => void;
   onRefresh: () => void;
   onAttachmentAdded: (item: CaptureItem) => void;
   onAttachmentDeleted: (item: CaptureItem) => void;
-  onCheckpointCreated: (id: string) => void;
-  checkpointRefs: React.MutableRefObject<Record<string, HTMLDivElement | null>>;
+  onCheckpointCreated: (checkpoint: CaptureItem, movedAttachmentIds: string[]) => void;
 }
 
 export function DocumentWorkspace({
   session,
   sessionNote,
-  checkpoints,
   attachmentsMap,
-  expandedIds,
-  onToggleCheckpoint,
   onRefresh,
   onAttachmentAdded,
   onAttachmentDeleted,
-  onCheckpointCreated,
-  checkpointRefs
+  onCheckpointCreated
 }: DocumentWorkspaceProps) {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [titleValue, setTitleValue] = useState(session.name);
   const [isEditingDesc, setIsEditingDesc] = useState(false);
   const [descValue, setDescValue] = useState(session.description || "");
   const [pendingAfterId, setPendingAfterId] = useState<string | null>(null);
+  const [currentNoteContent, setCurrentNoteContent] = useState(sessionNote?.content || "");
+  const [noteResetToken, setNoteResetToken] = useState(0);
+
+  useEffect(() => {
+    setCurrentNoteContent(sessionNote?.content || "");
+  }, [sessionNote?.$id, sessionNote?.$updatedAt, sessionNote?.content]);
 
   const handleTitleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -83,7 +82,7 @@ export function DocumentWorkspace({
     try {
       await upsertSessionNote(session.$id, text);
     } catch (err) {
-      console.error("Failed to save session note:", err);
+      logError("Failed to save session note", err, { sessionId: session.$id });
       throw err;
     }
   };
@@ -94,35 +93,10 @@ export function DocumentWorkspace({
     year: "numeric"
   });
 
-  const timestampMs = (value?: string) => {
-    if (!value) return Date.now();
-    const time = new Date(value).getTime();
-    return Number.isFinite(time) ? time : Date.now();
-  };
-
-  const getInsertedCreatedAt = (afterId: string) => {
-    if (afterId === "session") {
-      const lastCheckpoint = checkpoints[checkpoints.length - 1];
-      const lastCheckpointTime = timestampMs(lastCheckpoint?.createdAt);
-      return new Date(Math.max(Date.now(), lastCheckpointTime + 1)).toISOString();
-    }
-
-    const currentIndex = checkpoints.findIndex((checkpoint) => checkpoint.$id === afterId);
-    const currentCheckpoint = checkpoints[currentIndex];
-    const nextCheckpoint = checkpoints[currentIndex + 1];
-    const currentTime = timestampMs(currentCheckpoint?.createdAt);
-
-    if (!nextCheckpoint) {
-      return new Date(Math.max(Date.now(), currentTime + 1)).toISOString();
-    }
-
-    const nextTime = timestampMs(nextCheckpoint.createdAt);
-    return new Date(currentTime + Math.max(1, Math.floor((nextTime - currentTime) / 2))).toISOString();
-  };
-
   const handleCreateCheckpoint = async (name: string) => {
     const localStorageKey = `retrace_note_session_${session.$id}`;
-    let noteContent = sessionNote?.content || "";
+    const mediaBoundaryKey = `${localStorageKey}:media_boundary`;
+    let noteContent = currentNoteContent;
 
     try {
       const rawBuffer = window.localStorage.getItem(localStorageKey);
@@ -137,7 +111,7 @@ export function DocumentWorkspace({
     const withTimeout = async <T,>(promise: Promise<T>) => {
       let timeoutId: number | undefined;
       const timeout = new Promise<never>((_, reject) => {
-        timeoutId = window.setTimeout(() => reject(new Error("Creating checkpoint timed out. Please try again.")), 20000);
+        timeoutId = window.setTimeout(() => reject(new Error("Creating checkpoint timed out. Please try again.")), uiDurations.checkpointCreateTimeoutMs);
       });
       try {
         return await Promise.race([promise, timeout]);
@@ -146,15 +120,22 @@ export function DocumentWorkspace({
       }
     };
 
-    const created = await withTimeout(createCheckpoint(session.$id, name, getInsertedCreatedAt("session"), noteContent));
+    const sessionAttachments = attachmentsMap["session"] || [];
+    const attachmentIds = sessionAttachments.map((attachment) => attachment.$id);
+    const created = await withTimeout(
+      createCheckpoint(session.$id, name, new Date().toISOString(), noteContent, { attachmentIds })
+    );
     await withTimeout(upsertSessionNote(session.$id, ""));
+    setCurrentNoteContent("");
+    setNoteResetToken((value) => value + 1);
     try {
       window.localStorage.removeItem(localStorageKey);
+      window.localStorage.removeItem(mediaBoundaryKey);
     } catch {
       // The persisted checkpoint is now the source of truth.
     }
     setPendingAfterId(null);
-    onCheckpointCreated(created.$id);
+    onCheckpointCreated(created, attachmentIds);
   };
 
   return (
@@ -232,42 +213,16 @@ export function DocumentWorkspace({
         </div>
       </div>
 
-      {/* Checkpoints */}
-      <div>
-        <div className="flex flex-col gap-0">
-          {checkpoints.map((cp, index) => (
-            <div
-              key={cp.$id}
-              className={index > 0 ? "border-t border-border pt-2" : ""}
-              ref={(el) => {
-                checkpointRefs.current[cp.$id] = el;
-              }}
-            >
-              <CheckpointSection
-                sessionId={session.$id}
-                checkpoint={cp}
-                index={index}
-                attachments={attachmentsMap[cp.$id] || []}
-                isExpanded={expandedIds.includes(cp.$id)}
-                onToggle={() => onToggleCheckpoint(cp.$id)}
-                onUpdate={onRefresh}
-                onAttachmentAdded={onAttachmentAdded}
-                onAttachmentDeleted={onAttachmentDeleted}
-              />
-            </div>
-          ))}
-        </div>
-      </div>
-
       {/* Current loose notes */}
-      <div className="mb-2 rounded-card border border-border bg-surface px-6 py-5">
+      <div id="session-current-notes" className="mb-2 scroll-mt-8 rounded-card border border-border bg-surface px-6 py-5">
         <NoteArea
-          key={`session-note-${sessionNote?.$updatedAt ?? "new"}-${sessionNote?.content?.length ?? 0}`}
+          key={`session-note-${sessionNote?.$updatedAt ?? "new"}-${sessionNote?.content?.length ?? 0}-${noteResetToken}`}
           sessionId={session.$id}
           checkpointId={null}
-          initialValue={sessionNote?.content || ""}
+          initialValue={currentNoteContent}
           initialUpdatedAt={sessionNote?.$updatedAt ?? sessionNote?.createdAt}
           onSave={handleSessionNoteSave}
+          onValueChange={setCurrentNoteContent}
           attachments={attachmentsMap["session"] || []}
           onAttachmentAdded={onAttachmentAdded}
           onAttachmentDeleted={onAttachmentDeleted}
@@ -318,7 +273,7 @@ function CheckpointCreateControl({ isOpen = false, onOpen, onCancel, onCreate }:
       await onCreate(name.trim());
       setName("");
     } catch (err) {
-      console.error("Failed to create checkpoint:", err);
+      logError("Failed to create checkpoint", err);
       setError(err instanceof Error ? err.message : "Could not create checkpoint. Please try again.");
     } finally {
       isSubmittingRef.current = false;

@@ -1,6 +1,5 @@
 "use client";
 
-import { motion, useReducedMotion } from "framer-motion";
 import { Icon } from "../Icon";
 import { NewSessionCard } from "./NewSessionCard";
 
@@ -29,7 +28,7 @@ const cards = [
   },
   {
     title: "See how Retrace works",
-    description: "Watch a 2-minute overview of sessions, captures, and AI resume cards.",
+    description: "Watch a 2-minute overview of sessions, captures, and checkpoints.",
     label: "Watch overview",
     icon: "video" as const,
     tone: "neutral" as const,
@@ -37,34 +36,17 @@ const cards = [
   }
 ];
 
-const container = {
-  hidden: { opacity: 0 },
-  show: { opacity: 1, transition: { staggerChildren: 0.08 } },
-  exit: { opacity: 0 }
-};
-
-const item = (reduce: boolean) => ({
-  hidden: { opacity: 0, y: reduce ? 0 : 16 },
-  show: { opacity: 1, y: 0 },
-  exit: { opacity: 0, y: reduce ? 0 : -8 }
-});
-
 export function GettingStartedCards({ onCreateSession }: GettingStartedCardsProps) {
-  const reduce = useReducedMotion();
-
   return (
-    <motion.div animate="show" className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4" exit="exit" initial="hidden" variants={container}>
+    <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
       {cards.map((card) => (
-        <motion.button
-          className={`flex min-h-session-card flex-col rounded-card bg-surface p-5 text-left shadow-card transition-colors hover:border-border-hover hover:shadow-card-hover ${
+        <button
+          className={`flex min-h-session-card flex-col rounded-card bg-surface p-5 text-left shadow-card transition-all hover:-translate-y-0.5 hover:border-border-hover hover:shadow-card-hover motion-reduce:hover:translate-y-0 ${
             card.tone === "primary" ? "border-[1.5px] border-primary" : "border border-border"
           }`}
           key={card.title}
           onClick={card.action === "create" ? onCreateSession : undefined}
-          transition={{ duration: reduce ? 0.2 : 0.35, ease: "easeOut" }}
           type="button"
-          variants={item(Boolean(reduce))}
-          whileHover={reduce ? undefined : { y: -2 }}
         >
           <div className="flex items-start justify-between gap-3">
             <span
@@ -91,11 +73,11 @@ export function GettingStartedCards({ onCreateSession }: GettingStartedCardsProp
           <h3 className="mt-6 text-base font-semibold text-text-primary">{card.title}</h3>
           <p className="mt-1 flex-1 text-sm leading-[1.6] text-text-muted">{card.description}</p>
           <span className="mt-8 text-sm font-medium text-primary">{card.label} →</span>
-        </motion.button>
+        </button>
       ))}
-      <motion.div transition={{ duration: reduce ? 0.2 : 0.35, ease: "easeOut" }} variants={item(Boolean(reduce))}>
+      <div>
         <NewSessionCard onClick={onCreateSession} />
-      </motion.div>
-    </motion.div>
+      </div>
+    </div>
   );
 }

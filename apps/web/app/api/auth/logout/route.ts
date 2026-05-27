@@ -1,19 +1,15 @@
 import { NextResponse } from "next/server";
 import { SESSION_COOKIE_NAME, sessionCookieOptions } from "../../../../lib/auth-session";
 import { createSessionAccount } from "../../../../lib/server/appwrite";
+import { readSessionSecret } from "../../../../lib/server/session-cookie";
 
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
-  const session = request.headers
-    .get("cookie")
-    ?.split(";")
-    .map((part) => part.trim())
-    .find((part) => part.startsWith(`${SESSION_COOKIE_NAME}=`))
-    ?.slice(SESSION_COOKIE_NAME.length + 1);
+  const session = readSessionSecret(request);
 
   if (session) {
-    await createSessionAccount(decodeURIComponent(session)).deleteSession({ sessionId: "current" }).catch(() => {});
+    await createSessionAccount(session).deleteSession({ sessionId: "current" }).catch(() => {});
   }
 
   const response = NextResponse.json({ success: true });

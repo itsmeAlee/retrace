@@ -2,7 +2,7 @@ import { Account, Client, ID, Permission, Query, Role, Storage, TablesDB } from 
 import { InputFile } from 'node-appwrite/file';
 
 const STATUS_VALUES = new Set(['active', 'paused', 'completed', 'archived']);
-const CAPTURE_TYPES = new Set(['text', 'url', 'video', 'pdf', 'image', 'file']);
+const CAPTURE_TYPES = new Set(['text', 'url', 'video', 'pdf', 'image', 'file', 'audio']);
 
 export function env(name, fallback = undefined) {
   const value = process.env[name] ?? fallback;
@@ -19,9 +19,9 @@ export function config() {
     dbId: env('DB_ID'),
     sessionsTableId: env('SESSIONS_COL_ID'),
     capturesTableId: env('CAPTURE_ITEMS_COL_ID'),
-    captureDetailsTableId: process.env.CAPTURE_DETAILS_COL_ID ?? 'capture_details',
-    captureDetailsBucketId: process.env.CAPTURE_DETAILS_BUCKET_ID ?? 'capture-details',
-    sessionFilesBucketId: process.env.SESSION_FILES_BUCKET_ID ?? 'session-files',
+    captureDetailsTableId: process.env.CAPTURE_DETAILS_COL_ID,
+    captureDetailsBucketId: process.env.CAPTURE_DETAILS_BUCKET_ID,
+    sessionFilesBucketId: process.env.SESSION_FILES_BUCKET_ID,
     appUrl: process.env.APP_URL ?? '*',
   };
 }
@@ -263,11 +263,25 @@ export async function getCaptureDetails({ cfg, storage, tables, captureId, userI
     throw error;
   }
 
-  const buffer = await storage.getFileDownload({
+  const download = await storage.getFileDownload({
     bucketId: cfg.captureDetailsBucketId,
     fileId: row.detailsFileId,
   });
-  const text = new TextDecoder().decode(buffer);
+  return parseDetailsDownload(download);
+}
+
+function parseDetailsDownload(download) {
+  if (!download) return {};
+  if (typeof download === 'object' && !ArrayBuffer.isView(download) && !(download instanceof ArrayBuffer)) {
+    return download;
+  }
+  if (typeof download === 'string') {
+    return JSON.parse(download || '{}');
+  }
+  const bytes = download instanceof ArrayBuffer
+    ? new Uint8Array(download)
+    : new Uint8Array(download.buffer, download.byteOffset, download.byteLength);
+  const text = new TextDecoder().decode(bytes);
   return JSON.parse(text || '{}');
 }
 

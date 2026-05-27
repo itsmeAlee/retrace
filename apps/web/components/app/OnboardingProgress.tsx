@@ -6,7 +6,7 @@ type OnboardingProgressProps = {
   hasSessions: boolean;
 };
 
-const steps = ["Create a session", "Capture something", "Resume with AI"];
+const steps = ["Create a session", "Capture something", "Review your sources"];
 
 export function OnboardingProgress({ hasSessions }: OnboardingProgressProps) {
   const completed = [hasSessions, false, false];
